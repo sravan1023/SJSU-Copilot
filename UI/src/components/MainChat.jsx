@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { 
   Send, 
   ThumbsUp, 
@@ -9,7 +10,9 @@ import {
   Mic,
   ArrowUp,
   RotateCw,
-  Copy
+  Copy,
+  Check,
+  X
 } from 'lucide-react';
 import { SuggestionCard, FollowUpChip } from './Common';
 
@@ -21,6 +24,25 @@ export default function MainChat({
   isTyping,
   messagesEndRef 
 }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState("");
+
+  const startEditing = (id, text) => {
+    setEditingId(id);
+    setEditText(text);
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setEditText("");
+  };
+
+  const saveEdit = (id) => {
+    // In a real app, you'd call a function passed from parent to update state
+    // For now, let's assume the UI should just reflect the change if possible
+    setEditingId(null);
+  };
+
   return (
     <main className="flex-1 flex flex-col relative bg-bg-main transition-colors duration-300 min-w-0">
       {/* Top Navigation */}
@@ -58,10 +80,46 @@ export default function MainChat({
               </div>
               
               {messages.map((msg) => (
-                  <div key={msg.id} className={`flex flex-col mb-6 ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                  <div key={msg.id} className={`flex flex-col mb-6 group ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
                       {msg.sender === 'user' ? (
-                          <div className="bg-[#f4f4f4] dark:bg-[#2f2f2f] text-text-primary px-5 py-3.5 rounded-[26px] max-w-[85%] text-[1rem] leading-relaxed">
-                            {msg.text}
+                          <div className="flex flex-col items-end max-w-[85%]">
+                            {editingId === msg.id ? (
+                                <div className="w-full bg-[#f4f4f4] dark:bg-[#2f2f2f] rounded-[22px] p-2 border border-sjsu-gold/30">
+                                    <textarea
+                                        value={editText}
+                                        onChange={(e) => setEditText(e.target.value)}
+                                        className="w-full bg-transparent text-text-primary px-3 py-2 focus:outline-none resize-none min-h-[60px]"
+                                        autoFocus
+                                    />
+                                    <div className="flex justify-end gap-2 pt-1 pr-1">
+                                        <button 
+                                            onClick={cancelEditing}
+                                            className="p-1.5 rounded-full hover:bg-white/10 text-text-secondary transition-colors"
+                                        >
+                                            <X size={16} />
+                                        </button>
+                                        <button 
+                                            onClick={() => saveEdit(msg.id)}
+                                            className="p-1.5 rounded-full bg-sjsu-gold text-white hover:bg-sjsu-gold-hover transition-colors"
+                                        >
+                                            <Check size={16} />
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="bg-[#f4f4f4] dark:bg-[#2f2f2f] text-text-primary px-5 py-3.5 rounded-[26px] text-[1rem] leading-relaxed relative group">
+                                        {msg.text}
+                                        <button 
+                                            onClick={() => startEditing(msg.id, msg.text)}
+                                            className="absolute -left-10 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-2 hover:bg-bg-hover rounded-full transition-all text-text-secondary"
+                                            title="Edit message"
+                                        >
+                                            <Edit2 size={14} />
+                                        </button>
+                                    </div>
+                                </>
+                            )}
                           </div>
                       ) : (
                           <div className="w-full max-w-4xl pr-4">
