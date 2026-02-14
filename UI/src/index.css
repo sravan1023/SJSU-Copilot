@@ -1,3 +1,83 @@
 @import "tailwindcss";
 
 @variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-bg-main: var(--bg-main);
+  --color-bg-sidebar: var(--bg-sidebar);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-input: var(--bg-input);
+  --color-bg-hover: var(--bg-hover);
+  
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-inverse: var(--text-inverse);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-sjsu-gold: var(--sjsu-gold);
+  --color-sjsu-gold-hover: var(--sjsu-gold-hover);
+  --color-border-color: var(--border-color);
+
+  --color-sidebar-text-main: var(--sidebar-text-main);
+  --color-sidebar-text-muted: var(--sidebar-text-muted);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-hover: var(--sidebar-hover);
+
+  --color-sjsu-gold: var(--sjsu-gold);
+  --color-sjsu-gold-hover: var(--sjsu-gold-hover);
+}
+
+:root {
+  /* LIGHT MODE - Clean & Modern Blue Theme */
+  --bg-main: #F8FAFC;        /* Light Slate/Cool Gray background */
+  --bg-sidebar: #0055A2;     /* User's choice: SJSU Blue */
+  --bg-surface: #FFFFFF;     /* White surface for cards/panels */
+  --bg-input: #FFFFFF;       /* White input */
+  --bg-hover: #F1F5F9;       /* Light gray hover */
+
+  --text-primary: #0F172A;   /* Dark Slate (almost black) */
+  --text-secondary: #4b5664; /* Slate Gray */
+  --text-inverse: #FFFFFF;   /* White text */
+
+  /* Sidebar Specific Colors (Blue Background) */
+  --sidebar-text-main: #FFFFFF;        /* White text on blue */
+  --sidebar-text-muted: #BFDBFE;       /* Light Blue text (blue-200) */
+  --sidebar-border: rgba(255, 255, 255, 0.1); /* Subtle white border */
+  --sidebar-hover: rgba(255, 255, 255, 0.1);  /* White overlay on hover */
+
+  --primary: #0055A2;        /* Match sidebar blue */
+  --primary-hover: #004482;  /* Darker blue for interactions */
+
+  --sjsu-gold: #E5A823;      /* SJSU Gold */
+  --sjsu-gold-hover: #D49612; /* Darker Gold */
+  
+  --border-color: #E2E8F0;   /* Light Slate border */
+}
+
+.dark {
+  /* DARK MODE - Modern Dark */
+  --bg-main: #111827;        /* Dark gray/black background */
+  --bg-sidebar: #030712;     /* Almost pure black sidebar */
+  --bg-surface: #1F2937;     /* Dark gray surface */
+  --bg-input: #374151;       /* Darker input background */
+  --bg-hover: #374151;       /* Hover state on dark */
+
+  --text-primary: #F9FAFB;   /* Off-white text */
+  --text-secondary: #9CA3AF; /* Light gray text */
+  --text-inverse: #FFFFFF;   /* White text */
+
+  /* Sidebar Specific Colors (Dark Background) */
+  --sidebar-text-main: #F3F4F6;        /* Gray-100 */
+  --sidebar-text-muted: #6B7280;       /* Gray-500 */
+  --sidebar-border: #1F2937;           /* Dark border */
+  --sidebar-hover: #1F2937;            /* Dark hover */
+
+  --primary: #38BDF8;        /* Sky Blue for dark mode visibility (no green) */
+  --primary-hover: #0EA5E9;  /* Sky Blue-500 */
+
+  --sjsu-gold: #E5A823;      /* SJSU Gold */
+  --sjsu-gold-hover: #D49612; /* Darker Gold */
+
+  --border-color: #374151;   /* Dark border */
+}
