@@ -9,7 +9,7 @@ export default {
     extend: {
       colors: {
         'aiva-dark': '#3F4E3E',
-        'aiva-darker': '#2A3629', // For sidebar
+        'aiva-darker': '#2A3629',
         'aiva-cream': '#F5F2EA',
         'aiva-sage': '#EBF3E8',
         'aiva-input': '#F3EAD8',
@@ -17,7 +17,8 @@ export default {
         'aiva-border': '#D8CDBF',
       },
       fontFamily: {
-        sans: ['Inter', 'sans-serif'],
+        sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+        display: ['LEMONMILK', 'system-ui', 'sans-serif'],
       }
     },
   },
