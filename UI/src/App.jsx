@@ -2,15 +2,23 @@ import { useState, useRef, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import MainChat from './components/MainChat';
 import RightPanel from './components/RightPanel';
+import UserProfile from './components/UserProfile';
+import Login from './components/Login';
+import Signup from './components/Signup';
 import './App.css';
 
 export default function App() {
+  // Auth state
+  const [authPage, setAuthPage] = useState('login'); // 'login' | 'signup' | null
+  const [user, setUser] = useState(null);
+
   // State
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [rightPanelContent, setRightPanelContent] = useState('empty');
+  const [currentPage, setCurrentPage] = useState('chat');
   const messagesEndRef = useRef(null);
 
   // Apply dark mode class to html element
@@ -70,25 +78,63 @@ Let me know if you would like to know more about specific departments or campus 
     setRightPanelContent('empty');
   };
 
+  const handleLogin = (credentials) => {
+    // TODO: Replace with real auth
+    console.log('Login:', credentials);
+    setUser({ email: credentials.email });
+    setAuthPage(null);
+  };
+
+  const handleSignup = (data) => {
+    // TODO: Replace with real auth
+    console.log('Signup:', data);
+    setUser({ email: data.email, name: data.fullName });
+    setAuthPage(null);
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    setAuthPage('login');
+    setMessages([]);
+    setRightPanelContent('empty');
+    setCurrentPage('chat');
+  };
+
+  // Show auth pages if not logged in
+  if (authPage === 'login') {
+    return <Login onLogin={handleLogin} onSwitchToSignup={() => setAuthPage('signup')} />;
+  }
+  if (authPage === 'signup') {
+    return <Signup onSignup={handleSignup} onSwitchToLogin={() => setAuthPage('login')} />;
+  }
+
   return (
     <div className="flex h-screen text-text-primary font-sans overflow-hidden transition-colors duration-300 bg-bg-main">
       <Sidebar 
         startNewChat={startNewChat} 
         isDarkMode={isDarkMode} 
-        setIsDarkMode={setIsDarkMode} 
+        setIsDarkMode={setIsDarkMode}
+        onProfileClick={() => setCurrentPage('profile')}
+        onLogout={handleLogout} 
       />
       
-      <MainChat 
-        messages={messages}
-        input={input}
-        setInput={setInput}
-        handleSend={handleSend}
-        isTyping={isTyping}
-        messagesEndRef={messagesEndRef}
-      />
-      <RightPanel 
-        rightPanelContent={rightPanelContent} 
-      />
+      {currentPage === 'profile' ? (
+        <UserProfile onBack={() => setCurrentPage('chat')} />
+      ) : (
+        <>
+          <MainChat 
+            messages={messages}
+            input={input}
+            setInput={setInput}
+            handleSend={handleSend}
+            isTyping={isTyping}
+            messagesEndRef={messagesEndRef}
+          />
+          <RightPanel 
+            rightPanelContent={rightPanelContent} 
+          />
+        </>
+      )}
     </div>
   );
 }
