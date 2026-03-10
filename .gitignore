@@ -26,11 +26,8 @@ dist-ssr
 .DS_Store
 Thumbs.db
 
-# Local agent instruction file
-.github/instructions/chatbot.instructions.md
+.github/
 
-# Environment files with secrets
+# Environment files
 UI/.env
-.env
-
 .env
