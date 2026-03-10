@@ -5,12 +5,70 @@ import RightPanel from './components/RightPanel';
 import UserProfile from './components/UserProfile';
 import Login from './components/Login';
 import Signup from './components/Signup';
+import VerifyEmail from './components/VerifyEmail';
+import { supabase } from './supabaseClient';
+import { ensureProfile } from './supabaseHelpers';
 import './App.css';
 
 export default function App() {
   // Auth state
-  const [authPage, setAuthPage] = useState('login'); // 'login' | 'signup' | null
+  const [authPage, setAuthPage] = useState('login'); // 'login' | 'signup' | 'verify-email' | null
   const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [unverifiedEmail, setUnverifiedEmail] = useState('');
+
+  // Check for existing session and listen for auth changes
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        // Verify @sjsu.edu domain even for cached sessions
+        if (!session.user.email?.endsWith('@sjsu.edu')) {
+          await supabase.auth.signOut();
+          setAuthLoading(false);
+          return;
+        }
+        // Check email verification (skip for OAuth users — they're already verified by Google)
+        const isOAuth = session.user.app_metadata?.provider !== 'email';
+        if (!isOAuth && !session.user.email_confirmed_at) {
+          setUnverifiedEmail(session.user.email);
+          setAuthPage('verify-email');
+          setAuthLoading(false);
+          return;
+        }
+        await ensureProfile(session.user);
+        setUser(session.user);
+        setAuthPage(null);
+      }
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        // Verify @sjsu.edu domain for OAuth logins
+        if (!session.user.email?.endsWith('@sjsu.edu')) {
+          await supabase.auth.signOut();
+          setUser(null);
+          setAuthPage('login');
+          return;
+        }
+        // Check email verification (skip for OAuth users)
+        const isOAuth = session.user.app_metadata?.provider !== 'email';
+        if (!isOAuth && !session.user.email_confirmed_at) {
+          setUnverifiedEmail(session.user.email);
+          setAuthPage('verify-email');
+          return;
+        }
+        await ensureProfile(session.user);
+        setUser(session.user);
+        setAuthPage(null);
+      } else {
+        setUser(null);
+        setAuthPage('login');
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   // State
   const [messages, setMessages] = useState([]);
@@ -78,21 +136,18 @@ Let me know if you would like to know more about specific departments or campus 
     setRightPanelContent('empty');
   };
 
-  const handleLogin = (credentials) => {
-    // TODO: Replace with real auth
-    console.log('Login:', credentials);
-    setUser({ email: credentials.email });
+  const handleLogin = (user) => {
+    setUser(user);
     setAuthPage(null);
   };
 
-  const handleSignup = (data) => {
-    // TODO: Replace with real auth
-    console.log('Signup:', data);
-    setUser({ email: data.email, name: data.fullName });
+  const handleSignup = (user) => {
+    setUser(user);
     setAuthPage(null);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
     setAuthPage('login');
     setMessages([]);
@@ -100,12 +155,24 @@ Let me know if you would like to know more about specific departments or campus 
     setCurrentPage('chat');
   };
 
+  // Show loading while checking session
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0F172A]">
+        <div className="text-white text-lg">Loading...</div>
+      </div>
+    );
+  }
+
   // Show auth pages if not logged in
   if (authPage === 'login') {
     return <Login onLogin={handleLogin} onSwitchToSignup={() => setAuthPage('signup')} />;
   }
   if (authPage === 'signup') {
     return <Signup onSignup={handleSignup} onSwitchToLogin={() => setAuthPage('login')} />;
+  }
+  if (authPage === 'verify-email') {
+    return <VerifyEmail email={unverifiedEmail} onBackToLogin={() => setAuthPage('login')} />;
   }
 
   return (
@@ -115,11 +182,12 @@ Let me know if you would like to know more about specific departments or campus 
         isDarkMode={isDarkMode} 
         setIsDarkMode={setIsDarkMode}
         onProfileClick={() => setCurrentPage('profile')}
-        onLogout={handleLogout} 
+        onLogout={handleLogout}
+        user={user}
       />
       
       {currentPage === 'profile' ? (
-        <UserProfile onBack={() => setCurrentPage('chat')} />
+        <UserProfile onBack={() => setCurrentPage('chat')} user={user} />
       ) : (
         <>
           <MainChat 
