@@ -17,7 +17,8 @@ export default function Sidebar({
   isDarkMode, 
   setIsDarkMode,
   onProfileClick,
-  onLogout 
+  onLogout,
+  user
 }) {
   return (
     <aside className="w-64 bg-bg-sidebar text-sidebar-text-main flex flex-col shrink-0 transition-colors duration-300">
@@ -79,8 +80,7 @@ export default function Sidebar({
             <User2Icon size={16} className="text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-sidebar-text-main truncate">Student Name</p>
-            <p className="text-xs text-sidebar-text-muted truncate">student@sjsu.edu</p>
+            <p className="text-sm font-medium text-sidebar-text-main truncate">{user?.user_metadata?.full_name || user?.user_metadata?.name || 'Student'}</p>
           </div>
           <div className="flex items-center gap-0.5 transition-opacity">
             <button 
@@ -98,7 +98,7 @@ export default function Sidebar({
                   e.stopPropagation();
                   onLogout();
               }}
-              className="p-1.5 rounded-md hover:bg-white/10 transition-colors text-sidebar-text-muted hover:text-white"
+              className="p-1.5 rounded-md hover:bg-red-500/20 transition-colors text-sidebar-text-muted hover:text-red-400"
               title="Logout"
             >
               <LogOut size={14} />
