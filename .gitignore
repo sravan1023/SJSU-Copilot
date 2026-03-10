@@ -26,8 +26,15 @@ dist-ssr
 .DS_Store
 Thumbs.db
 
+<<<<<<< HEAD
 .github/
+=======
+>>>>>>> 21b15119c22647bdf02d5b6f89a4612cb67190a4
 
 # Environment files
 UI/.env
+<<<<<<< HEAD
 .env
+=======
+.env
+>>>>>>> 21b15119c22647bdf02d5b6f89a4612cb67190a4

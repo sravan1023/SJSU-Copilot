@@ -1,1 +1,1 @@
-# Capstone--SJSU-Chatbot
+# SJSU-Chatbot
