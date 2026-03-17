@@ -11,7 +11,7 @@ import { ensureProfile } from './supabaseHelpers';
 import './App.css';
 
 export default function App() {
-  // Auth state
+  // Authentication state
   const [authPage, setAuthPage] = useState('login'); // 'login' | 'signup' | 'verify-email' | null
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
