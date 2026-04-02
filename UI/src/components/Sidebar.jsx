@@ -1,24 +1,25 @@
 import { 
   Plus, 
   Search, 
-  GraduationCap, 
-  Calendar, 
-  Briefcase, 
-  Clock, 
+  GraduationCap,
+  Calendar,
+  Bell,
   User2Icon, 
   Sun, 
   Moon, 
   LogOut 
 } from 'lucide-react';
-import { SidebarToolItem, HistoryItem } from './Common';
+import { SidebarToolItem } from './Common';
 
 export default function Sidebar({ 
   startNewChat, 
   isDarkMode, 
   setIsDarkMode,
   onProfileClick,
+  onInternAlertsClick,
   onLogout,
-  user
+  user,
+  currentPage,
 }) {
   return (
     <aside className="w-64 bg-bg-sidebar text-sidebar-text-main flex flex-col shrink-0 transition-colors duration-300">
@@ -56,7 +57,12 @@ export default function Sidebar({
         <div className="space-y-1">
           <SidebarToolItem icon={<GraduationCap size={16} />} label="Degree Progress" />
           <SidebarToolItem icon={<Calendar size={16} />} label="Registration Info" />
-          <SidebarToolItem icon={<Briefcase size={16} />} label="Internship Alerts" />
+          <SidebarToolItem
+            icon={<Bell size={16} />}
+            label="Intern Alerts"
+            active={currentPage === 'intern-alerts'}
+            onClick={onInternAlertsClick}
+          />
         </div>
       </div>
 

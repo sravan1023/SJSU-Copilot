@@ -37,7 +37,7 @@ export default function MainChat({
     setEditText("");
   };
 
-  const saveEdit = (id) => {
+  const saveEdit = () => {
     // In a real app, you'd call a function passed from parent to update state
     // For now, let's assume the UI should just reflect the change if possible
     setEditingId(null);
@@ -99,7 +99,7 @@ export default function MainChat({
                                             <X size={16} />
                                         </button>
                                         <button 
-                                            onClick={() => saveEdit(msg.id)}
+                                            onClick={() => saveEdit()}
                                             className="p-1.5 rounded-full bg-sjsu-gold text-white hover:bg-sjsu-gold-hover transition-colors"
                                         >
                                             <Check size={16} />

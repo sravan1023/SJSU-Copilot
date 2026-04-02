@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
-export default function Login({ onLogin, onSwitchToSignup }) {
+export default function Login({ onLogin, onSwitchToSignup, authError = '' }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -19,16 +19,29 @@ export default function Login({ onLogin, onSwitchToSignup }) {
     }
     setError('');
     setLoading(true);
-    const { data, error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    setLoading(false);
-    if (authError) {
-      setError(authError.message);
-      return;
+    try {
+      const timeoutMs = 12000;
+      const signInRes = await Promise.race([
+        supabase.auth.signInWithPassword({
+          email,
+          password,
+        }),
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Login timed out. Check your Supabase connection and try again.')), timeoutMs);
+        }),
+      ]);
+
+      const { data, error: signInError } = signInRes;
+      if (signInError) {
+        setError(signInError.message);
+        return;
+      }
+      onLogin(data.user);
+    } catch (submitError) {
+      setError(submitError?.message || 'Login failed.');
+    } finally {
+      setLoading(false);
     }
-    onLogin(data.user);
   };
 
   const handleGoogleLogin = async () => {
@@ -58,6 +71,12 @@ export default function Login({ onLogin, onSwitchToSignup }) {
           {error && (
             <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm mb-4">
               {error}
+            </div>
+          )}
+
+          {!error && authError && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 text-amber-300 text-sm mb-4">
+              {authError}
             </div>
           )}
 

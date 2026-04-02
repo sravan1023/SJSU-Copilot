@@ -1,10 +1,10 @@
-
 -- Supabase Schema
 
 -- 0. EXTENSIONS
 
 create extension if not exists "pgcrypto";
-create extension if not exists "vector";   -- pgvector for RAG
+create extension if not exists "vector";
+-- pgvector for RAG
 
 
 
@@ -26,7 +26,6 @@ create table if not exists public.profiles (
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
-
 create or replace function public.handle_updated_at()
 returns trigger as $$
 begin
@@ -34,11 +33,9 @@ begin
   return new;
 end;
 $$ language plpgsql;
-
 create trigger on_profiles_updated
   before update on public.profiles
   for each row execute function public.handle_updated_at();
-
 -- 2. AUTO-CREATE PROFILE ON SIGNUP
 
 create or replace function public.handle_new_user()
@@ -53,12 +50,9 @@ begin
   return new;
 end;
 $$ language plpgsql security definer;
-
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
-
-
 -- 3. DOMAIN RESTRICTION — @sjsu.edu only
 
 create or replace function public.enforce_sjsu_email()
@@ -70,7 +64,6 @@ begin
   return new;
 end;
 $$ language plpgsql security definer;
-
 -- Attempt to add the guard against non-SJSU emails at the database level.
 do $$
 begin
@@ -81,29 +74,22 @@ exception when others then
   raise notice 'Could not create trigger on auth.users — enforce domain in Edge Function instead.';
 end;
 $$;
-
-
 -- 4. RLS ON PROFILES
 
 alter table public.profiles enable row level security;
-
 -- Users can read their own profile
 create policy "Users can view own profile"
   on public.profiles for select
   using (auth.uid() = id);
-
 -- Users can update their own profile
 create policy "Users can update own profile"
   on public.profiles for update
   using (auth.uid() = id)
   with check (auth.uid() = id);
-
 -- Insert is allowed so the app can self-create a profile row after Google OAuth
 create policy "Users can insert own profile"
   on public.profiles for insert
   with check (auth.uid() = id);
-
-
 -- 5. STUDENT ACADEMIC RECORDS
 
 create table if not exists public.student_academic_records (
@@ -118,26 +104,19 @@ create table if not exists public.student_academic_records (
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
-
 create trigger on_academic_records_updated
   before update on public.student_academic_records
   for each row execute function public.handle_updated_at();
-
 alter table public.student_academic_records enable row level security;
-
 create policy "Users can view own academic records"
   on public.student_academic_records for select
   using (auth.uid() = user_id);
-
 create policy "Users can update own academic records"
   on public.student_academic_records for update
   using (auth.uid() = user_id);
-
 create policy "Users can insert own academic records"
   on public.student_academic_records for insert
   with check (auth.uid() = user_id);
-
-
 -- 6. SAVED CONVERSATIONS
 
 create table if not exists public.saved_conversations (
@@ -147,30 +126,22 @@ create table if not exists public.saved_conversations (
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
-
 create trigger on_conversations_updated
   before update on public.saved_conversations
   for each row execute function public.handle_updated_at();
-
 alter table public.saved_conversations enable row level security;
-
 create policy "Users can view own conversations"
   on public.saved_conversations for select
   using (auth.uid() = user_id);
-
 create policy "Users can insert own conversations"
   on public.saved_conversations for insert
   with check (auth.uid() = user_id);
-
 create policy "Users can update own conversations"
   on public.saved_conversations for update
   using (auth.uid() = user_id);
-
 create policy "Users can delete own conversations"
   on public.saved_conversations for delete
   using (auth.uid() = user_id);
-
-
 -- 7. CHAT MESSAGES
 
 create table if not exists public.chat_messages (
@@ -181,18 +152,13 @@ create table if not exists public.chat_messages (
   content           text not null,
   created_at        timestamptz not null default now()
 );
-
 alter table public.chat_messages enable row level security;
-
 create policy "Users can view own messages"
   on public.chat_messages for select
   using (auth.uid() = user_id);
-
 create policy "Users can insert own messages"
   on public.chat_messages for insert
   with check (auth.uid() = user_id);
-
-
 -- 8. UPLOADED DOCUMENTS (student-owned files)
 
 create table if not exists public.uploaded_documents (
@@ -204,22 +170,16 @@ create table if not exists public.uploaded_documents (
   size_bytes    bigint,
   created_at    timestamptz not null default now()
 );
-
 alter table public.uploaded_documents enable row level security;
-
 create policy "Users can view own uploads"
   on public.uploaded_documents for select
   using (auth.uid() = owner_id);
-
 create policy "Users can insert own uploads"
   on public.uploaded_documents for insert
   with check (auth.uid() = owner_id);
-
 create policy "Users can delete own uploads"
   on public.uploaded_documents for delete
   using (auth.uid() = owner_id);
-
-
 -- 9. RAG — DOCUMENTS & CHUNKS
 
 -- Public university documents (policies, catalogs, FAQs, etc.)
@@ -234,7 +194,6 @@ create table if not exists public.documents (
   metadata        jsonb default '{}',
   created_at      timestamptz not null default now()
 );
-
 create table if not exists public.document_chunks (
   id              uuid primary key default gen_random_uuid(),
   document_id     uuid not null references public.documents(id) on delete cascade,
@@ -244,25 +203,20 @@ create table if not exists public.document_chunks (
   metadata        jsonb default '{}',
   created_at      timestamptz not null default now()
 );
-
 -- Vector similarity index (IVFFlat — good default for most workloads)
 create index if not exists idx_document_chunks_embedding
   on public.document_chunks
   using ivfflat (embedding vector_cosine_ops)
   with (lists = 100);
-
 -- RLS: university docs are readable by any authenticated user
 alter table public.documents enable row level security;
 alter table public.document_chunks enable row level security;
-
 create policy "Authenticated users can read documents"
   on public.documents for select
   using (auth.role() = 'authenticated');
-
 create policy "Authenticated users can read document chunks"
   on public.document_chunks for select
   using (auth.role() = 'authenticated');
-
 -- Only service_role (backend) can insert/update/delete RAG documents.
 -- No explicit user-facing insert/update/delete policies.
 

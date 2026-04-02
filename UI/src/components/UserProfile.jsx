@@ -17,7 +17,7 @@ export default function UserProfile({ onBack, user }) {
   });
 
   const [saved, setSaved] = useState(false);
-  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [_loadingProfile, setLoadingProfile] = useState(true);
 
   // Load profile from Supabase on mount
   useEffect(() => {

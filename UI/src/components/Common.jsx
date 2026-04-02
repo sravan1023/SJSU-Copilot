@@ -26,14 +26,19 @@ export function LinkItem({ label, isFirst = false }) {
     );
 }
 
-export function SidebarToolItem({ icon, label }) {
+export function SidebarToolItem({ icon, label, active = false, onClick }) {
     return (
-        <div className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/10 cursor-pointer transition-colors group">
-            <div className="text-sidebar-text-muted group-hover:text-white transition-colors">
+        <button
+            onClick={onClick}
+            className={`w-full flex items-center gap-3 px-2 py-2 rounded-lg cursor-pointer transition-colors group ${
+                active ? 'bg-white/15' : 'hover:bg-white/10'
+            }`}
+        >
+            <div className={`transition-colors ${active ? 'text-white' : 'text-sidebar-text-muted group-hover:text-white'}`}>
                 {icon}
             </div>
             <span className="text-sm text-sidebar-text-main font-medium">{label}</span>
-        </div>
+        </button>
     );
 }
 
