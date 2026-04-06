@@ -1,26 +1,44 @@
-import { 
-  Plus, 
-  Search, 
+import { useRef, useCallback } from 'react';
+import {
+  Plus,
+  Search,
   GraduationCap,
   Calendar,
   Bell,
-  User2Icon, 
-  Sun, 
-  Moon, 
-  LogOut 
+  User2Icon,
+  Sun,
+  Moon,
+  LogOut
 } from 'lucide-react';
-import { SidebarToolItem } from './Common';
+import { SidebarToolItem, HistoryItem } from './Common';
 
-export default function Sidebar({ 
-  startNewChat, 
-  isDarkMode, 
+export default function Sidebar({
+  startNewChat,
+  isDarkMode,
   setIsDarkMode,
   onProfileClick,
   onInternAlertsClick,
   onLogout,
   user,
   currentPage,
+  conversations = [],
+  currentConversationId,
+  onSelectConversation,
+  onRenameConversation,
+  onDeleteConversation,
+  hasMoreConversations,
+  onLoadMoreConversations,
 }) {
+  const scrollRef = useRef(null);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || !hasMoreConversations) return;
+    // Load more when scrolled near bottom
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) {
+      onLoadMoreConversations?.();
+    }
+  }, [hasMoreConversations, onLoadMoreConversations]);
   return (
     <aside className="w-64 bg-bg-sidebar text-sidebar-text-main flex flex-col shrink-0 transition-colors duration-300">
       <div className="px-5 py-6">
@@ -67,11 +85,30 @@ export default function Sidebar({
       </div>
 
       {/* Chat History */}
-      <div className="flex-1 overflow-y-auto px-4 scrollbar-hide">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-4 scrollbar-hide"
+      >
         <div>
           <h3 className="text-[11px] font-semibold text-sidebar-text-muted mb-2 uppercase tracking-wider">Recent</h3>
           <ul className="space-y-0.5 text-sm">
-            {/* History items will appear here */}
+            {conversations.map((c) => (
+              <HistoryItem
+                key={c.id}
+                id={c.id}
+                title={c.title}
+                preview={c.last_message_preview}
+                updatedAt={c.updated_at}
+                active={c.id === currentConversationId}
+                onClick={onSelectConversation}
+                onRename={onRenameConversation}
+                onDelete={onDeleteConversation}
+              />
+            ))}
+            {conversations.length === 0 && (
+              <li className="text-xs text-sidebar-text-muted px-2 py-3">No conversations yet</li>
+            )}
           </ul>
         </div>
       </div>
