@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import MainChat from './components/MainChat';
 import RightPanel from './components/RightPanel';
@@ -10,6 +10,19 @@ import VerifyEmail from './components/VerifyEmail';
 import { supabase } from './supabaseClient';
 import { ensureProfile } from './supabaseHelpers';
 import { runDueJobFetchCycle } from './services/jobFetcher';
+import { sendMessage, generateTitle } from './services/llamaService';
+import {
+  fetchConversations,
+  createConversation,
+  updateConversation,
+  renameConversation,
+  deleteConversation,
+  fetchMessages,
+  insertMessage,
+  deleteMessage,
+  deleteMessagesAfter,
+  autoTitleIfNeeded,
+} from './services/chatService';
 import './App.css';
 
 export default function App() {
@@ -137,14 +150,23 @@ export default function App() {
     };
   }, []);
 
-  // State
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
+  // UI state
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
-  const [rightPanelContent, setRightPanelContent] = useState('empty');
   const [currentPage, setCurrentPage] = useState('chat');
+  const [rightPanelContent, setRightPanelContent] = useState('empty');
+  const [selectedModel, setSelectedModel] = useState('8b');
+
+  // Chat / conversation state
+  const [conversations, setConversations] = useState([]);
+  const [currentConversationId, setCurrentConversationId] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [hasMoreConversations, setHasMoreConversations] = useState(false);
   const messagesEndRef = useRef(null);
+  const abortRef = useRef(null);
 
   // Apply dark mode class to html element
   useEffect(() => {
@@ -155,6 +177,7 @@ export default function App() {
     }
   }, [isDarkMode]);
 
+  // Job fetcher scheduler
   useEffect(() => {
     if (!user?.id) return undefined;
 
@@ -181,55 +204,342 @@ export default function App() {
     return () => clearInterval(intervalId);
   }, [user?.id]);
 
-  // Scroll to bottom when messages change
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-  
+  // ── Load conversations when user logs in ──────────────────
+  const loadConversations = useCallback(async (cursor = null) => {
+    if (!user?.id) return;
+    try {
+      const data = await fetchConversations({ limit: 20, cursor });
+      if (cursor) {
+        setConversations(prev => [...prev, ...data]);
+      } else {
+        setConversations(data);
+      }
+      setHasMoreConversations(data.length === 20);
+    } catch (err) {
+      console.error('Failed to load conversations:', err.message);
+    }
+  }, [user?.id]);
+
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    loadConversations();
+  }, [loadConversations]);
 
-  // Handle sending a message
-  const handleSend = () => {
-    if (!input.trim()) return;
+  const loadMoreConversations = useCallback(() => {
+    if (!hasMoreConversations || !conversations.length) return;
+    const oldest = conversations[conversations.length - 1];
+    loadConversations(oldest.updated_at);
+  }, [hasMoreConversations, conversations, loadConversations]);
 
-    // Add user message
-    const userMsg = { id: Date.now(), text: input, sender: 'user' };
-    setMessages(prev => [...prev, userMsg]);
-    setInput("");
+  // ── Open a conversation ───────────────────────────────────
+  const openConversation = useCallback(async (conversationId) => {
+    setCurrentConversationId(conversationId);
+    setMessages([]);
+    setCurrentPage('chat');
+    setLoadingMessages(true);
+
+    try {
+      const msgs = await fetchMessages({ conversationId, limit: 30 });
+      const mapped = msgs.map(m => ({
+        id: m.id,
+        text: m.content,
+        sender: m.role === 'user' ? 'user' : 'bot',
+        created_at: m.created_at,
+      }));
+      setMessages(mapped);
+      setHasMoreMessages(msgs.length === 30);
+      if (mapped.length > 0) setRightPanelContent('links');
+    } catch (err) {
+      console.error('Failed to load messages:', err.message);
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, []);
+
+  // ── Load older messages (scroll up) ───────────────────────
+  const loadOlderMessages = useCallback(async () => {
+    if (!currentConversationId || !hasMoreMessages || loadingMessages) return;
+    setLoadingMessages(true);
+
+    try {
+      const oldest = messages[0];
+      const cursor = oldest?.created_at || null;
+      const older = await fetchMessages({ conversationId: currentConversationId, limit: 30, cursor });
+      const mapped = older.map(m => ({
+        id: m.id,
+        text: m.content,
+        sender: m.role === 'user' ? 'user' : 'bot',
+        created_at: m.created_at,
+      }));
+      setMessages(prev => [...mapped, ...prev]);
+      setHasMoreMessages(older.length === 30);
+    } catch (err) {
+      console.error('Failed to load older messages:', err.message);
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, [currentConversationId, hasMoreMessages, loadingMessages, messages]);
+
+  // Scroll to bottom when new messages arrive (not when loading older)
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    if (!loadingMessages) scrollToBottom();
+  }, [messages, loadingMessages]);
+
+  // ── Send a message ────────────────────────────────────────
+  const handleSend = async () => {
+    if (!input.trim() || !user?.id) return;
+
+    const userText = input.trim();
+    setInput('');
     setIsTyping(true);
-    
-    // Switch to active state immediately
     setRightPanelContent('links');
 
-    // Simulate AI response
-    setTimeout(() => {
-      const aiMsg = { 
-        id: Date.now() + 1, 
-        text: `San Jose State University (SJSU) is the founding campus of the California State University (CSU) system and the oldest public university on the West Coast.
+    try {
+      // Create conversation on first message if needed
+      let convoId = currentConversationId;
+      if (!convoId) {
+        const convo = await createConversation(user.id);
+        convoId = convo.id;
+        setCurrentConversationId(convoId);
+        // Add to sidebar immediately
+        setConversations(prev => [convo, ...prev]);
+      }
 
-Located in downtown San Jose, the university offers more than 145 areas of study with an additional 108 concentrations. SJSU is known for its strong programs in engineering, business, and computer science, and its proximity to Silicon Valley tech giants.
+      // Persist user message
+      const userRow = await insertMessage({ conversationId: convoId, role: 'user', content: userText });
+      const userMsg = { id: userRow.id, text: userText, sender: 'user', created_at: userRow.created_at };
+      setMessages(prev => [...prev, userMsg]);
 
-**Key Highlights:**
-• **Rankings:** Often ranked as one of the top public universities in the West.
-• **innovation:** A hub for student startups and research.
-• **diversity:** A vibrant campus with a diverse student body.
+      // Auto-title from first user message
+      autoTitleIfNeeded(convoId, userText, generateTitle).then(() => loadConversations()).catch(() => {});
 
-Let me know if you would like to know more about specific departments or campus life!`,
-        sender: 'bot' 
-      };
-      setMessages(prev => [...prev, aiMsg]);
+      // Build context for LLM (last 20 messages)
+      const currentMessages = [...messages, userMsg];
+      const context = currentMessages.slice(-20).map(m => ({
+        role: m.sender === 'user' ? 'user' : 'assistant',
+        content: m.text,
+      }));
+
+      // Placeholder for streaming bot response
+      const tempId = `temp-${Date.now()}`;
+      setMessages(prev => [...prev, { id: tempId, text: '', sender: 'bot' }]);
+
+      // Abort any in-flight request
+      if (abortRef.current) abortRef.current.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      let fullResponse = '';
+      await sendMessage({
+        messages: context,
+        model: selectedModel,
+        signal: controller.signal,
+        onChunk: (chunk) => {
+          fullResponse += chunk;
+          setMessages(prev =>
+            prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m)
+          );
+        },
+      });
+
+      // Persist assistant message
+      const assistantRow = await insertMessage({ conversationId: convoId, role: 'assistant', content: fullResponse });
+
+      // Replace temp message with persisted one
+      setMessages(prev =>
+        prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m)
+      );
+
+      // Refresh sidebar to reflect updated preview/time
+      loadConversations();
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      // Show error in the last bot message
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.sender === 'bot') {
+          return prev.map(m => m.id === last.id ? { ...m, text: `**Error:** ${err.message}` } : m);
+        }
+        return [...prev, { id: `err-${Date.now()}`, text: `**Error:** ${err.message}`, sender: 'bot' }];
+      });
+    } finally {
       setIsTyping(false);
-    }, 2000);
+      abortRef.current = null;
+    }
   };
 
+  // ── Regenerate last assistant response ─────────────────────
+  const handleRegenerate = async () => {
+    if (!currentConversationId || !user?.id || isTyping) return;
+
+    // Find the last bot message and the user message before it
+    const lastBotIdx = [...messages].reverse().findIndex(m => m.sender === 'bot');
+    if (lastBotIdx === -1) return;
+    const botIdx = messages.length - 1 - lastBotIdx;
+    const botMsg = messages[botIdx];
+
+    // Find the last user message before this bot message
+    let userMsg = null;
+    for (let i = botIdx - 1; i >= 0; i--) {
+      if (messages[i].sender === 'user') { userMsg = messages[i]; break; }
+    }
+    if (!userMsg) return;
+
+    // Delete the bot message from DB (if it's persisted, not temp)
+    if (botMsg.id && !String(botMsg.id).startsWith('temp-') && !String(botMsg.id).startsWith('err-')) {
+      try { await deleteMessage(botMsg.id); } catch {}
+    }
+
+    // Remove bot message from local state
+    setMessages(prev => prev.filter(m => m.id !== botMsg.id));
+    setIsTyping(true);
+
+    // Build context
+    const context = messages
+      .slice(0, botIdx)
+      .slice(-20)
+      .map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text }));
+
+    const tempId = `temp-${Date.now()}`;
+    setMessages(prev => [...prev, { id: tempId, text: '', sender: 'bot' }]);
+
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      let fullResponse = '';
+      await sendMessage({
+        messages: context,
+        model: selectedModel,
+        signal: controller.signal,
+        onChunk: (chunk) => {
+          fullResponse += chunk;
+          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m));
+        },
+      });
+
+      const assistantRow = await insertMessage({ conversationId: currentConversationId, role: 'assistant', content: fullResponse });
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m));
+      loadConversations();
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: `**Error:** ${err.message}` } : m));
+    } finally {
+      setIsTyping(false);
+      abortRef.current = null;
+    }
+  };
+
+  // ── Edit a previous user message and resubmit ────────────
+  const handleEditAndResubmit = async (msgId, newText) => {
+    if (!currentConversationId || !user?.id || isTyping) return;
+
+    const msgIdx = messages.findIndex(m => m.id === msgId);
+    if (msgIdx === -1) return;
+    const originalMsg = messages[msgIdx];
+
+    // Delete all messages from this point onward in DB
+    if (originalMsg.created_at) {
+      try { await deleteMessagesAfter(currentConversationId, originalMsg.created_at); } catch {}
+    }
+
+    // Truncate local messages up to (not including) the edited message
+    const preceding = messages.slice(0, msgIdx);
+    setMessages(preceding);
+    setIsTyping(true);
+
+    try {
+      // Insert the edited user message
+      const userRow = await insertMessage({ conversationId: currentConversationId, role: 'user', content: newText });
+      const userMsg = { id: userRow.id, text: newText, sender: 'user', created_at: userRow.created_at };
+      setMessages(prev => [...prev, userMsg]);
+
+      // Build context
+      const context = [...preceding, userMsg].slice(-20).map(m => ({
+        role: m.sender === 'user' ? 'user' : 'assistant',
+        content: m.text,
+      }));
+
+      const tempId = `temp-${Date.now()}`;
+      setMessages(prev => [...prev, { id: tempId, text: '', sender: 'bot' }]);
+
+      if (abortRef.current) abortRef.current.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      let fullResponse = '';
+      await sendMessage({
+        messages: context,
+        model: selectedModel,
+        signal: controller.signal,
+        onChunk: (chunk) => {
+          fullResponse += chunk;
+          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m));
+        },
+      });
+
+      const assistantRow = await insertMessage({ conversationId: currentConversationId, role: 'assistant', content: fullResponse });
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m));
+      loadConversations();
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.sender === 'bot') {
+          return prev.map(m => m.id === last.id ? { ...m, text: `**Error:** ${err.message}` } : m);
+        }
+        return [...prev, { id: `err-${Date.now()}`, text: `**Error:** ${err.message}`, sender: 'bot' }];
+      });
+    } finally {
+      setIsTyping(false);
+      abortRef.current = null;
+    }
+  };
+
+  // ── Suggestion click (from empty state or follow-up chips)─
+  const handleSuggestionClick = (text) => {
+    setInput(text);
+  };
+
+  // ── New chat ──────────────────────────────────────────────
   const startNewChat = () => {
+    setCurrentConversationId(null);
     setMessages([]);
     setRightPanelContent('empty');
     setCurrentPage('chat');
   };
 
+  // ── Rename / Delete ───────────────────────────────────────
+  const handleRenameConversation = async (convoId, newTitle) => {
+    try {
+      await renameConversation(convoId, newTitle);
+      setConversations(prev =>
+        prev.map(c => c.id === convoId ? { ...c, title: newTitle } : c)
+      );
+    } catch (err) {
+      console.error('Rename failed:', err.message);
+    }
+  };
+
+  const handleDeleteConversation = async (convoId) => {
+    try {
+      await deleteConversation(convoId);
+      setConversations(prev => prev.filter(c => c.id !== convoId));
+      if (currentConversationId === convoId) {
+        setCurrentConversationId(null);
+        setMessages([]);
+        setRightPanelContent('empty');
+      }
+    } catch (err) {
+      console.error('Delete failed:', err.message);
+    }
+  };
+
+  // ── Auth handlers ─────────────────────────────────────────
   const handleLogin = (user) => {
     setUser(user);
     setAuthPage(null);
@@ -245,6 +555,8 @@ Let me know if you would like to know more about specific departments or campus 
     setUser(null);
     setAuthPage('login');
     setMessages([]);
+    setConversations([]);
+    setCurrentConversationId(null);
     setRightPanelContent('empty');
     setCurrentPage('chat');
   };
@@ -271,15 +583,22 @@ Let me know if you would like to know more about specific departments or campus 
 
   return (
     <div className="flex h-screen text-text-primary font-sans overflow-hidden transition-colors duration-300 bg-bg-main">
-      <Sidebar 
-        startNewChat={startNewChat} 
-        isDarkMode={isDarkMode} 
+      <Sidebar
+        startNewChat={startNewChat}
+        isDarkMode={isDarkMode}
         setIsDarkMode={setIsDarkMode}
         onProfileClick={() => setCurrentPage('profile')}
         onInternAlertsClick={() => setCurrentPage('intern-alerts')}
         onLogout={handleLogout}
         user={user}
         currentPage={currentPage}
+        conversations={conversations}
+        currentConversationId={currentConversationId}
+        onSelectConversation={openConversation}
+        onRenameConversation={handleRenameConversation}
+        onDeleteConversation={handleDeleteConversation}
+        hasMoreConversations={hasMoreConversations}
+        onLoadMoreConversations={loadMoreConversations}
       />
       
       {currentPage === 'profile' ? (
@@ -288,13 +607,21 @@ Let me know if you would like to know more about specific departments or campus 
         <InternJobsAlertsPage onBack={() => setCurrentPage('chat')} />
       ) : (
         <>
-          <MainChat 
+          <MainChat
             messages={messages}
             input={input}
             setInput={setInput}
             handleSend={handleSend}
             isTyping={isTyping}
             messagesEndRef={messagesEndRef}
+            selectedModel={selectedModel}
+            setSelectedModel={setSelectedModel}
+            hasMoreMessages={hasMoreMessages}
+            loadingMessages={loadingMessages}
+            onLoadOlderMessages={loadOlderMessages}
+            onRegenerate={handleRegenerate}
+            onEditAndResubmit={handleEditAndResubmit}
+            onSuggestionClick={handleSuggestionClick}
           />
           <RightPanel 
             rightPanelContent={rightPanelContent} 

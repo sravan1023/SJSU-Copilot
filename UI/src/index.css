@@ -109,3 +109,12 @@
 
   --border-color: #374151;   /* Dark border */
 }
+
+/* Hide scrollbars everywhere they appear */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
