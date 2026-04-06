@@ -1,3 +1,4 @@
+
 # Logs
 logs
 *.log
@@ -7,34 +8,44 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
 
-# Editor directories and files
+# Dependencies & Build
+node_modules/
+dist/
+dist-ssr/
+build/
+
+
+# Environment Variables (Hushhhhh...Seriously don’t push this)
+.env
+.env.*
+!.env.example
+UI/.env
+UI/.env.*
+
+
+# Local / Machine-specific
+*.local
+settings.local.json
+.claude/
+
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+
+# Editor / IDE
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
 
-.DS_Store
-Thumbs.db
 
-<<<<<<< HEAD
-.github/
-=======
->>>>>>> 21b15119c22647bdf02d5b6f89a4612cb67190a4
-
-# Environment files
-UI/.env
-<<<<<<< HEAD
-.env
-=======
-.env
->>>>>>> 21b15119c22647bdf02d5b6f89a4612cb67190a4
+# Misc
+coverage/
+.cache/
