@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Save, User2Icon, Mail, Phone, BookOpen, GraduationCap, Calendar, Hash } from 'lucide-react';
+import { ArrowLeft, Save, User2Icon, Mail, Phone, BookOpen, GraduationCap, Calendar, Hash, Brain, Sliders, ListOrdered } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import MemoryManagement from './MemoryManagement';
+import BehaviorSettings from './BehaviorSettings';
+import PrioritySettings from './PrioritySettings';
 
-export default function UserProfile({ onBack, user }) {
+export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBehavior }) {
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -18,6 +21,8 @@ export default function UserProfile({ onBack, user }) {
 
   const [saved, setSaved] = useState(false);
   const [_loadingProfile, setLoadingProfile] = useState(true);
+  const [activeTab, setActiveTab] = useState('profile'); // 'profile' | 'personalization'
+  const [personalSection, setPersonalSection] = useState('style'); // 'style' | 'priorities' | 'memory'
 
   // Load profile from Supabase on mount
   useEffect(() => {
@@ -94,13 +99,113 @@ export default function UserProfile({ onBack, user }) {
         >
           <ArrowLeft size={20} />
         </button>
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary">User Profile</h1>
-          <p className="text-sm text-text-secondary">Enter your details to personalize your experience</p>
+        <div className="flex-1">
+          <h1 className="text-2xl font-bold text-text-primary">Settings</h1>
+          <p className="text-sm text-text-secondary">Manage your profile, behavior, and memory</p>
+        </div>
+        {/* Tab switcher */}
+        <div className="flex items-center bg-bg-surface border border-border-color rounded-lg p-1 gap-1">
+          <button
+            onClick={() => setActiveTab('profile')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'profile'
+                ? 'bg-white dark:bg-bg-hover text-text-primary shadow-sm'
+                : 'text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            <User2Icon size={15} />
+            Profile
+          </button>
+          <button
+            onClick={() => setActiveTab('personalization')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'personalization'
+                ? 'bg-white dark:bg-bg-hover text-text-primary shadow-sm'
+                : 'text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            <Sliders size={15} />
+            Personalization
+          </button>
         </div>
       </div>
 
-      {/* Form */}
+      {/* Body */}
+      {activeTab === 'personalization' ? (
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left nav */}
+          <nav className="w-56 shrink-0 border-r border-border-color bg-bg-surface/50 py-6 px-3 space-y-1 overflow-y-auto">
+            <button
+              onClick={() => setPersonalSection('style')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                personalSection === 'style'
+                  ? 'bg-sjsu-gold/10 text-sjsu-gold'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+              }`}
+            >
+              <Sliders size={16} />
+              Response Style
+            </button>
+            <button
+              onClick={() => setPersonalSection('priorities')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                personalSection === 'priorities'
+                  ? 'bg-sjsu-gold/10 text-sjsu-gold'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+              }`}
+            >
+              <ListOrdered size={16} />
+              Priorities
+            </button>
+            <button
+              onClick={() => setPersonalSection('memory')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                personalSection === 'memory'
+                  ? 'bg-sjsu-gold/10 text-sjsu-gold'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-hover'
+              }`}
+            >
+              <Brain size={16} />
+              Memory
+            </button>
+          </nav>
+
+          {/* Right content */}
+          <div className="flex-1 overflow-y-auto">
+            <div className="max-w-2xl mx-auto px-8 py-8">
+              {personalSection === 'style' ? (
+                <>
+                  <div className="mb-6">
+                    <h2 className="text-lg font-bold text-text-primary">Response Style</h2>
+                    <p className="text-sm text-text-secondary mt-0.5">Control how SJSU Copilot writes its responses</p>
+                  </div>
+                  <BehaviorSettings settings={behaviorSettings} onUpdate={onUpdateBehavior} />
+                </>
+              ) : personalSection === 'priorities' ? (
+                <>
+                  <div className="mb-6">
+                    <h2 className="text-lg font-bold text-text-primary">Priorities</h2>
+                    <p className="text-sm text-text-secondary mt-0.5">What Copilot optimizes for when tradeoffs appear</p>
+                  </div>
+                  <PrioritySettings
+                    stack={behaviorSettings?.priority_stack}
+                    onUpdate={onUpdateBehavior}
+                  />
+                </>
+              ) : (
+                <>
+                  <div className="mb-6">
+                    <h2 className="text-lg font-bold text-text-primary">Memory</h2>
+                    <p className="text-sm text-text-secondary mt-0.5">Review and manage what Copilot remembers about you</p>
+                  </div>
+                  <MemoryManagement user={user} />
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+      /* Form */
       <div className="flex-1 flex justify-center px-8 py-10">
         <form onSubmit={handleSubmit} className="w-full max-w-2xl space-y-8">
           
@@ -300,6 +405,7 @@ export default function UserProfile({ onBack, user }) {
           </div>
         </form>
       </div>
+      )}
     </div>
   );
 }

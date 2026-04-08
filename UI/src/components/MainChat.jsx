@@ -158,6 +158,7 @@ export default function MainChat({
   onRegenerate,
   onEditAndResubmit,
   onSuggestionClick,
+  onFeedback,
 }) {
   const chatContainerRef = useRef(null);
 
@@ -201,10 +202,11 @@ export default function MainChat({
   // ── Feedback state (thumbs) ───────────────────────────────
   const [feedback, setFeedback] = useState({}); // { [msgId]: 'up' | 'down' }
   const toggleFeedback = (msgId, type) => {
-    setFeedback(prev => ({
-      ...prev,
-      [msgId]: prev[msgId] === type ? null : type,
-    }));
+    setFeedback(prev => {
+      const newType = prev[msgId] === type ? null : type;
+      onFeedback?.(msgId, newType);
+      return { ...prev, [msgId]: newType };
+    });
   };
 
   // Check if a message is currently streaming (temp id, bot, last in list)

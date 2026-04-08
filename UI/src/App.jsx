@@ -23,6 +23,9 @@ import {
   deleteMessagesAfter,
   autoTitleIfNeeded,
 } from './services/chatService';
+import { fetchBehaviorSettings, updateBehaviorSettings, resolveEffectiveBehavior, DEFAULT_BEHAVIOR } from './services/behaviorService';
+import { insertFeedbackLog, updateFeedbackVote } from './services/feedbackLogService';
+import { analyzeConversationState, adaptBehavior } from './services/conversationStateService';
 import {
   fetchProjects,
   createProject,
@@ -183,6 +186,9 @@ export default function App() {
   const [expandedProjects, setExpandedProjects] = useState({});
   const [activeProjectId, setActiveProjectId] = useState(null); // project context for new chats
 
+  // Behavior settings
+  const [behaviorSettings, setBehaviorSettings] = useState(null);
+
   // Apply dark mode class to html element
   useEffect(() => {
     if (isDarkMode) {
@@ -259,6 +265,27 @@ export default function App() {
   useEffect(() => {
     loadProjects();
   }, [loadProjects]);
+
+  // ── Load behavior settings when user logs in ────────────
+  useEffect(() => {
+    if (!user?.id) return;
+    fetchBehaviorSettings(user.id)
+      .then(setBehaviorSettings)
+      .catch(err => {
+        console.warn('Failed to load behavior settings, using defaults:', err.message);
+        setBehaviorSettings({ ...DEFAULT_BEHAVIOR });
+      });
+  }, [user?.id]);
+
+  const handleUpdateBehavior = async (updates) => {
+    if (!user?.id) return;
+    try {
+      const updated = await updateBehaviorSettings(user.id, updates);
+      setBehaviorSettings(updated);
+    } catch (err) {
+      console.error('Failed to update behavior settings:', err.message);
+    }
+  };
 
   const loadProjectConvos = useCallback(async (projectId) => {
     try {
@@ -465,21 +492,46 @@ export default function App() {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Resolve scoped behavior (conversation > project > user > defaults)
+      const effectiveBehavior = await resolveEffectiveBehavior(
+        user.id,
+        activeProjectId,
+        convoId,
+      ).catch(() => behaviorSettings);
+      const adaptedBehavior = adaptBehavior(effectiveBehavior, analyzeConversationState(context));
+
       let fullResponse = '';
-      await sendMessage({
+      const validatorMeta = await sendMessage({
         messages: context,
         model: selectedModel,
         signal: controller.signal,
+        behavior: adaptedBehavior,
         onChunk: (chunk) => {
           fullResponse += chunk;
           setMessages(prev =>
             prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m)
           );
         },
+        onReplace: (text) => {
+          fullResponse = text;
+          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text } : m));
+        },
       });
 
       // Persist assistant message
       const assistantRow = await insertMessage({ conversationId: convoId, role: 'assistant', content: fullResponse });
+
+      // Fire-and-forget feedback log entry for this response
+      insertFeedbackLog({
+        responseId:       assistantRow.id,
+        userId:           user.id,
+        conversationId:   convoId,
+        behaviorSnapshot: adaptedBehavior,
+        validatorsRun:    validatorMeta?.validatorsRun    ?? [],
+        validatorsPassed: validatorMeta?.validatorsPassed ?? true,
+        repairsApplied:   validatorMeta?.repairsApplied   ?? [],
+        modelUsed:        selectedModel,
+      }).catch(() => {});
 
       // Replace temp message with persisted one
       setMessages(prev =>
@@ -544,18 +596,43 @@ export default function App() {
     abortRef.current = controller;
 
     try {
+      // Resolve scoped behavior for the current conversation/project
+      const effectiveBehavior = await resolveEffectiveBehavior(
+        user.id,
+        activeProjectId,
+        currentConversationId,
+      ).catch(() => behaviorSettings);
+      const adaptedBehavior = adaptBehavior(effectiveBehavior, analyzeConversationState(context));
+
       let fullResponse = '';
-      await sendMessage({
+      const validatorMeta = await sendMessage({
         messages: context,
         model: selectedModel,
         signal: controller.signal,
+        behavior: adaptedBehavior,
         onChunk: (chunk) => {
           fullResponse += chunk;
           setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m));
         },
+        onReplace: (text) => {
+          fullResponse = text;
+          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text } : m));
+        },
       });
 
       const assistantRow = await insertMessage({ conversationId: currentConversationId, role: 'assistant', content: fullResponse });
+
+      insertFeedbackLog({
+        responseId:       assistantRow.id,
+        userId:           user.id,
+        conversationId:   currentConversationId,
+        behaviorSnapshot: adaptedBehavior,
+        validatorsRun:    validatorMeta?.validatorsRun    ?? [],
+        validatorsPassed: validatorMeta?.validatorsPassed ?? true,
+        repairsApplied:   validatorMeta?.repairsApplied   ?? [],
+        modelUsed:        selectedModel,
+      }).catch(() => {});
+
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m));
       loadConversations();
     } catch (err) {
@@ -604,18 +681,43 @@ export default function App() {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Resolve scoped behavior for the current conversation/project
+      const effectiveBehavior = await resolveEffectiveBehavior(
+        user.id,
+        activeProjectId,
+        currentConversationId,
+      ).catch(() => behaviorSettings);
+      const adaptedBehavior = adaptBehavior(effectiveBehavior, analyzeConversationState(context));
+
       let fullResponse = '';
-      await sendMessage({
+      const validatorMeta = await sendMessage({
         messages: context,
         model: selectedModel,
         signal: controller.signal,
+        behavior: adaptedBehavior,
         onChunk: (chunk) => {
           fullResponse += chunk;
           setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m));
         },
+        onReplace: (text) => {
+          fullResponse = text;
+          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text } : m));
+        },
       });
 
       const assistantRow = await insertMessage({ conversationId: currentConversationId, role: 'assistant', content: fullResponse });
+
+      insertFeedbackLog({
+        responseId:       assistantRow.id,
+        userId:           user.id,
+        conversationId:   currentConversationId,
+        behaviorSnapshot: adaptedBehavior,
+        validatorsRun:    validatorMeta?.validatorsRun    ?? [],
+        validatorsPassed: validatorMeta?.validatorsPassed ?? true,
+        repairsApplied:   validatorMeta?.repairsApplied   ?? [],
+        modelUsed:        selectedModel,
+      }).catch(() => {});
+
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m));
       loadConversations();
     } catch (err) {
@@ -637,6 +739,12 @@ export default function App() {
   const handleSuggestionClick = (text) => {
     setInput(text);
   };
+
+  // ── Feedback vote (thumbs-up / thumbs-down on bot messages) ──────────────
+  const handleFeedback = useCallback((msgId, type) => {
+    if (!user?.id || !type) return;
+    updateFeedbackVote(msgId, user.id, type).catch(() => {});
+  }, [user?.id]);
 
   // ── New chat ──────────────────────────────────────────────
   const startNewChat = () => {
@@ -758,7 +866,12 @@ export default function App() {
       />
       
       {currentPage === 'profile' ? (
-        <UserProfile onBack={() => setCurrentPage('chat')} user={user} />
+        <UserProfile
+          onBack={() => setCurrentPage('chat')}
+          user={user}
+          behaviorSettings={behaviorSettings}
+          onUpdateBehavior={handleUpdateBehavior}
+        />
       ) : currentPage === 'intern-alerts' ? (
         <InternJobsAlertsPage onBack={() => setCurrentPage('chat')} />
       ) : (
@@ -778,6 +891,7 @@ export default function App() {
             onRegenerate={handleRegenerate}
             onEditAndResubmit={handleEditAndResubmit}
             onSuggestionClick={handleSuggestionClick}
+            onFeedback={handleFeedback}
           />
           <RightPanel 
             rightPanelContent={rightPanelContent} 

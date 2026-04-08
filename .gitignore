@@ -49,3 +49,4 @@ Thumbs.db
 # Misc
 coverage/
 .cache/
+docs/BEHAVIOR_SYSTEM.md
