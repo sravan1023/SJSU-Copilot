@@ -264,7 +264,7 @@ export default function MainChat({
               <SuggestionCard title="Degree Requirements" subtitle="What classes do I need to graduate?" onClick={() => handleSuggestionClick('What classes do I need to graduate?')} />
               <SuggestionCard title="Registration Dates" subtitle="When is the deadline for Spring 2026?" onClick={() => handleSuggestionClick('When is the deadline for Spring 2026?')} />
               <SuggestionCard title="Professor Office Hours" subtitle="Where can I find my professors?" onClick={() => handleSuggestionClick('Where can I find my professors?')} />
-              <SuggestionCard title="Campus Dining" subtitle="What are the best places to eat near the SU?" onClick={() => handleSuggestionClick('What are the best places to eat near the SU?')} />
+              <SuggestionCard title="Campus Dining" subtitle="What are the best places to eat near the SU?" onClick={() => handleSuggestionClick('nearby restaurants')} />
               <SuggestionCard title="Internship Opportunities" subtitle="Show me roles for Software Engineering" onClick={() => handleSuggestionClick('Show me roles for Software Engineering')} />
               <SuggestionCard title="Library Resources" subtitle="How do I book a private study room?" onClick={() => handleSuggestionClick('How do I book a private study room?')} />
             </div>

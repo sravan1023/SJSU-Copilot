@@ -14,7 +14,6 @@ import { sendMessage, generateTitle } from './services/llamaService';
 import {
   fetchConversations,
   createConversation,
-  updateConversation,
   renameConversation,
   deleteConversation,
   fetchMessages,
@@ -36,16 +35,18 @@ import {
   unassignConversationFromProject,
 } from './services/projectService';
 import './App.css';
+import {
+  fetchNearbyRestaurants,
+  formatRestaurantsMessage,
+} from './services/restaurantsService';
 
 export default function App() {
-  // Authentication state
-  const [authPage, setAuthPage] = useState('login'); // 'login' | 'signup' | 'verify-email' | null
+  const [authPage, setAuthPage] = useState('login');
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState('');
   const [unverifiedEmail, setUnverifiedEmail] = useState('');
 
-  // Check for existing session and listen for auth changes
   useEffect(() => {
     let alive = true;
 
@@ -63,7 +64,6 @@ export default function App() {
         const session = sessionRes?.data?.session;
 
         if (session?.user) {
-          // Verify @sjsu.edu domain even for cached sessions
           if (!session.user.email?.endsWith('@sjsu.edu')) {
             await supabase.auth.signOut();
             if (alive) {
@@ -73,7 +73,6 @@ export default function App() {
             return;
           }
 
-          // Check email verification (skip for OAuth users — they're already verified by Google)
           const isOAuth = session.user.app_metadata?.provider !== 'email';
           if (!isOAuth && !session.user.email_confirmed_at) {
             if (alive) {
@@ -89,7 +88,6 @@ export default function App() {
             setAuthError('');
           }
 
-          // Do not block initial app render on profile sync.
           withTimeout(ensureProfile(session.user), 'Profile check').catch((profileError) => {
             if (alive) {
               console.warn('Profile sync warning:', profileError?.message || profileError);
@@ -112,10 +110,11 @@ export default function App() {
 
     bootstrapAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       try {
         if (session?.user) {
-          // Verify @sjsu.edu domain for OAuth logins
           if (session.user.email && !session.user.email.endsWith('@sjsu.edu')) {
             await supabase.auth.signOut();
             if (alive) {
@@ -124,7 +123,7 @@ export default function App() {
             }
             return;
           }
-          // Check email verification (skip for OAuth users)
+
           const isOAuth = session.user.app_metadata?.provider !== 'email';
           if (!isOAuth && !session.user.email_confirmed_at) {
             if (alive) {
@@ -162,13 +161,11 @@ export default function App() {
     };
   }, []);
 
-  // UI state
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [currentPage, setCurrentPage] = useState('chat');
   const [rightPanelContent, setRightPanelContent] = useState('empty');
   const [selectedModel, setSelectedModel] = useState('8b');
 
-  // Chat / conversation state
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -180,16 +177,14 @@ export default function App() {
   const messagesEndRef = useRef(null);
   const abortRef = useRef(null);
 
-  // Project state
   const [projects, setProjects] = useState([]);
-  const [projectConversations, setProjectConversations] = useState({}); // { projectId: [convos] }
+  const [projectConversations, setProjectConversations] = useState({});
   const [expandedProjects, setExpandedProjects] = useState({});
   const [activeProjectId, setActiveProjectId] = useState(null); // project context for new chats
 
   // Behavior settings
   const [behaviorSettings, setBehaviorSettings] = useState(null);
 
-  // Apply dark mode class to html element
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
@@ -198,7 +193,6 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  // Job fetcher scheduler
   useEffect(() => {
     if (!user?.id) return undefined;
 
@@ -225,7 +219,6 @@ export default function App() {
     return () => clearInterval(intervalId);
   }, [user?.id]);
 
-  // ── Load conversations when user logs in ──────────────────
   const loadConversations = useCallback(async (cursor = null) => {
     if (!user?.id) return;
     try {
@@ -251,7 +244,6 @@ export default function App() {
     loadConversations(oldest.updated_at);
   }, [hasMoreConversations, conversations, loadConversations]);
 
-  // ── Load projects when user logs in ──────────────────────
   const loadProjects = useCallback(async () => {
     if (!user?.id) return;
     try {
@@ -296,7 +288,6 @@ export default function App() {
     }
   }, []);
 
-  // ── Project handlers ──────────────────────────────────────
   const handleCreateProject = async (name) => {
     if (!user?.id) return;
     try {
@@ -328,7 +319,6 @@ export default function App() {
         return next;
       });
       if (activeProjectId === projectId) setActiveProjectId(null);
-      // Reload standalone conversations — unlinked convos will appear there
       loadConversations();
     } catch (err) {
       console.error('Delete project failed:', err.message);
@@ -354,11 +344,8 @@ export default function App() {
   const handleAssignToProject = async (conversationId, projectId) => {
     try {
       await assignConversationToProject(conversationId, projectId);
-      // Remove from standalone list
       setConversations(prev => prev.filter(c => c.id !== conversationId));
-      // Refresh project's conversation list
       loadProjectConvos(projectId);
-      // Expand the target project
       setExpandedProjects(prev => ({ ...prev, [projectId]: true }));
     } catch (err) {
       console.error('Assign to project failed:', err.message);
@@ -368,7 +355,6 @@ export default function App() {
   const handleRemoveFromProject = async (conversationId) => {
     try {
       await unassignConversationFromProject(conversationId);
-      // Remove from all project conversation lists
       setProjectConversations(prev => {
         const next = {};
         for (const [pid, convos] of Object.entries(prev)) {
@@ -376,14 +362,12 @@ export default function App() {
         }
         return next;
       });
-      // Reload standalone conversations
       loadConversations();
     } catch (err) {
       console.error('Remove from project failed:', err.message);
     }
   };
 
-  // ── Open a conversation ───────────────────────────────────
   const openConversation = useCallback(async (conversationId) => {
     setCurrentConversationId(conversationId);
     setMessages([]);
@@ -408,7 +392,6 @@ export default function App() {
     }
   }, []);
 
-  // ── Load older messages (scroll up) ───────────────────────
   const loadOlderMessages = useCallback(async () => {
     if (!currentConversationId || !hasMoreMessages || loadingMessages) return;
     setLoadingMessages(true);
@@ -432,7 +415,6 @@ export default function App() {
     }
   }, [currentConversationId, hasMoreMessages, loadingMessages, messages]);
 
-  // Scroll to bottom when new messages arrive (not when loading older)
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -441,23 +423,43 @@ export default function App() {
     if (!loadingMessages) scrollToBottom();
   }, [messages, loadingMessages]);
 
-  // ── Send a message ────────────────────────────────────────
+  const isRestaurantQuery = (text) => {
+    const q = text.toLowerCase().trim();
+
+    return (
+      q.includes('restaurant') ||
+      q.includes('restaurants') ||
+      q.includes('food') ||
+      q.includes('eat') ||
+      q.includes('lunch') ||
+      q.includes('dinner') ||
+      q.includes('breakfast') ||
+      q.includes('cafe') ||
+      q.includes('hungry') ||
+      q.includes('places to eat') ||
+      q.includes('near by restaurants') ||
+      q.includes('nearby restaurants')
+    );
+  };
+
   const handleSend = async () => {
     if (!input.trim() || !user?.id) return;
 
     const userText = input.trim();
+    const restaurantMode = isRestaurantQuery(userText);
+
     setInput('');
     setIsTyping(true);
     setRightPanelContent('links');
 
     try {
-      // Create conversation on first message if needed
       let convoId = currentConversationId;
+
       if (!convoId) {
         const convo = await createConversation(user.id, null, activeProjectId);
         convoId = convo.id;
         setCurrentConversationId(convoId);
-        // Add to sidebar — either in project or standalone
+
         if (activeProjectId) {
           setProjectConversations(prev => ({
             ...prev,
@@ -468,26 +470,108 @@ export default function App() {
         }
       }
 
-      // Persist user message
-      const userRow = await insertMessage({ conversationId: convoId, role: 'user', content: userText });
-      const userMsg = { id: userRow.id, text: userText, sender: 'user', created_at: userRow.created_at };
+      const userRow = await insertMessage({
+        conversationId: convoId,
+        role: 'user',
+        content: userText,
+      });
+
+      const userMsg = {
+        id: userRow.id,
+        text: userText,
+        sender: 'user',
+        created_at: userRow.created_at,
+      };
+
       setMessages(prev => [...prev, userMsg]);
 
-      // Auto-title from first user message
-      autoTitleIfNeeded(convoId, userText, generateTitle).then(() => loadConversations()).catch(() => {});
+      autoTitleIfNeeded(convoId, userText, generateTitle)
+        .then(() => loadConversations())
+        .catch(() => {});
 
-      // Build context for LLM (last 20 messages)
+      if (restaurantMode) {
+        const tempId = `temp-${Date.now()}`;
+
+        setMessages(prev => [
+          ...prev,
+          {
+            id: tempId,
+            text: '🔍 Finding restaurants near SJSU...',
+            sender: 'bot',
+          },
+        ]);
+
+        try {
+          const restaurants = await fetchNearbyRestaurants();
+          const restaurantReply = formatRestaurantsMessage(restaurants);
+
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === tempId ? { ...m, text: restaurantReply } : m
+            )
+          );
+
+          const assistantRow = await insertMessage({
+            conversationId: convoId,
+            role: 'assistant',
+            content: restaurantReply,
+          });
+
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === tempId
+                ? {
+                    ...m,
+                    id: assistantRow.id,
+                    created_at: assistantRow.created_at,
+                  }
+                : m
+            )
+          );
+
+          loadConversations();
+          return;
+        } catch (error) {
+          const fallback = `**Error:** ${error.message || 'Could not fetch nearby restaurants.'}`;
+
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === tempId ? { ...m, text: fallback } : m
+            )
+          );
+
+          const assistantRow = await insertMessage({
+            conversationId: convoId,
+            role: 'assistant',
+            content: fallback,
+          });
+
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === tempId
+                ? {
+                    ...m,
+                    id: assistantRow.id,
+                    created_at: assistantRow.created_at,
+                  }
+                : m
+            )
+          );
+
+          loadConversations();
+          return;
+        }
+      }
+
       const currentMessages = [...messages, userMsg];
       const context = currentMessages.slice(-20).map(m => ({
         role: m.sender === 'user' ? 'user' : 'assistant',
         content: m.text,
       }));
 
-      // Placeholder for streaming bot response
       const tempId = `temp-${Date.now()}`;
       setMessages(prev => [...prev, { id: tempId, text: '', sender: 'bot' }]);
 
-      // Abort any in-flight request
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -509,7 +593,9 @@ export default function App() {
         onChunk: (chunk) => {
           fullResponse += chunk;
           setMessages(prev =>
-            prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m)
+            prev.map(m =>
+              m.id === tempId ? { ...m, text: m.text + chunk } : m
+            )
           );
         },
         onReplace: (text) => {
@@ -535,20 +621,32 @@ export default function App() {
 
       // Replace temp message with persisted one
       setMessages(prev =>
-        prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m)
+        prev.map(m =>
+          m.id === tempId
+            ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at }
+            : m
+        )
       );
 
-      // Refresh sidebar to reflect updated preview/time
       loadConversations();
     } catch (err) {
       if (err.name === 'AbortError') return;
-      // Show error in the last bot message
+
       setMessages(prev => {
         const last = prev[prev.length - 1];
         if (last?.sender === 'bot') {
-          return prev.map(m => m.id === last.id ? { ...m, text: `**Error:** ${err.message}` } : m);
+          return prev.map(m =>
+            m.id === last.id ? { ...m, text: `**Error:** ${err.message}` } : m
+          );
         }
-        return [...prev, { id: `err-${Date.now()}`, text: `**Error:** ${err.message}`, sender: 'bot' }];
+        return [
+          ...prev,
+          {
+            id: `err-${Date.now()}`,
+            text: `**Error:** ${err.message}`,
+            sender: 'bot',
+          },
+        ];
       });
     } finally {
       setIsTyping(false);
@@ -556,37 +654,44 @@ export default function App() {
     }
   };
 
-  // ── Regenerate last assistant response ─────────────────────
   const handleRegenerate = async () => {
     if (!currentConversationId || !user?.id || isTyping) return;
 
-    // Find the last bot message and the user message before it
     const lastBotIdx = [...messages].reverse().findIndex(m => m.sender === 'bot');
     if (lastBotIdx === -1) return;
+
     const botIdx = messages.length - 1 - lastBotIdx;
     const botMsg = messages[botIdx];
 
-    // Find the last user message before this bot message
     let userMsg = null;
     for (let i = botIdx - 1; i >= 0; i--) {
-      if (messages[i].sender === 'user') { userMsg = messages[i]; break; }
+      if (messages[i].sender === 'user') {
+        userMsg = messages[i];
+        break;
+      }
     }
     if (!userMsg) return;
 
-    // Delete the bot message from DB (if it's persisted, not temp)
-    if (botMsg.id && !String(botMsg.id).startsWith('temp-') && !String(botMsg.id).startsWith('err-')) {
-      try { await deleteMessage(botMsg.id); } catch {}
+    if (
+      botMsg.id &&
+      !String(botMsg.id).startsWith('temp-') &&
+      !String(botMsg.id).startsWith('err-')
+    ) {
+      try {
+        await deleteMessage(botMsg.id);
+      } catch {}
     }
 
-    // Remove bot message from local state
     setMessages(prev => prev.filter(m => m.id !== botMsg.id));
     setIsTyping(true);
 
-    // Build context
     const context = messages
       .slice(0, botIdx)
       .slice(-20)
-      .map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text }));
+      .map(m => ({
+        role: m.sender === 'user' ? 'user' : 'assistant',
+        content: m.text,
+      }));
 
     const tempId = `temp-${Date.now()}`;
     setMessages(prev => [...prev, { id: tempId, text: '', sender: 'bot' }]);
@@ -637,14 +742,17 @@ export default function App() {
       loadConversations();
     } catch (err) {
       if (err.name === 'AbortError') return;
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: `**Error:** ${err.message}` } : m));
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === tempId ? { ...m, text: `**Error:** ${err.message}` } : m
+        )
+      );
     } finally {
       setIsTyping(false);
       abortRef.current = null;
     }
   };
 
-  // ── Edit a previous user message and resubmit ────────────
   const handleEditAndResubmit = async (msgId, newText) => {
     if (!currentConversationId || !user?.id || isTyping) return;
 
@@ -652,23 +760,32 @@ export default function App() {
     if (msgIdx === -1) return;
     const originalMsg = messages[msgIdx];
 
-    // Delete all messages from this point onward in DB
     if (originalMsg.created_at) {
-      try { await deleteMessagesAfter(currentConversationId, originalMsg.created_at); } catch {}
+      try {
+        await deleteMessagesAfter(currentConversationId, originalMsg.created_at);
+      } catch {}
     }
 
-    // Truncate local messages up to (not including) the edited message
     const preceding = messages.slice(0, msgIdx);
     setMessages(preceding);
     setIsTyping(true);
 
     try {
-      // Insert the edited user message
-      const userRow = await insertMessage({ conversationId: currentConversationId, role: 'user', content: newText });
-      const userMsg = { id: userRow.id, text: newText, sender: 'user', created_at: userRow.created_at };
+      const userRow = await insertMessage({
+        conversationId: currentConversationId,
+        role: 'user',
+        content: newText,
+      });
+
+      const userMsg = {
+        id: userRow.id,
+        text: newText,
+        sender: 'user',
+        created_at: userRow.created_at,
+      };
+
       setMessages(prev => [...prev, userMsg]);
 
-      // Build context
       const context = [...preceding, userMsg].slice(-20).map(m => ({
         role: m.sender === 'user' ? 'user' : 'assistant',
         content: m.text,
@@ -725,9 +842,18 @@ export default function App() {
       setMessages(prev => {
         const last = prev[prev.length - 1];
         if (last?.sender === 'bot') {
-          return prev.map(m => m.id === last.id ? { ...m, text: `**Error:** ${err.message}` } : m);
+          return prev.map(m =>
+            m.id === last.id ? { ...m, text: `**Error:** ${err.message}` } : m
+          );
         }
-        return [...prev, { id: `err-${Date.now()}`, text: `**Error:** ${err.message}`, sender: 'bot' }];
+        return [
+          ...prev,
+          {
+            id: `err-${Date.now()}`,
+            text: `**Error:** ${err.message}`,
+            sender: 'bot',
+          },
+        ];
       });
     } finally {
       setIsTyping(false);
@@ -735,7 +861,6 @@ export default function App() {
     }
   };
 
-  // ── Suggestion click (from empty state or follow-up chips)─
   const handleSuggestionClick = (text) => {
     setInput(text);
   };
@@ -755,12 +880,11 @@ export default function App() {
     setCurrentPage('chat');
   };
 
-  // ── Rename / Delete ───────────────────────────────────────
   const handleRenameConversation = async (convoId, newTitle) => {
     try {
       await renameConversation(convoId, newTitle);
       setConversations(prev =>
-        prev.map(c => c.id === convoId ? { ...c, title: newTitle } : c)
+        prev.map(c => (c.id === convoId ? { ...c, title: newTitle } : c))
       );
     } catch (err) {
       console.error('Rename failed:', err.message);
@@ -771,7 +895,6 @@ export default function App() {
     try {
       await deleteConversation(convoId);
       setConversations(prev => prev.filter(c => c.id !== convoId));
-      // Also remove from project conversation lists
       setProjectConversations(prev => {
         const next = {};
         for (const [pid, convos] of Object.entries(prev)) {
@@ -789,7 +912,6 @@ export default function App() {
     }
   };
 
-  // ── Auth handlers ─────────────────────────────────────────
   const handleLogin = (user) => {
     setUser(user);
     setAuthPage(null);
@@ -815,7 +937,6 @@ export default function App() {
     setActiveProjectId(null);
   };
 
-  // Show loading while checking session
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#0F172A]">
@@ -824,15 +945,32 @@ export default function App() {
     );
   }
 
-  // Show auth pages if not logged in
   if (authPage === 'login') {
-    return <Login onLogin={handleLogin} onSwitchToSignup={() => setAuthPage('signup')} authError={authError} />;
+    return (
+      <Login
+        onLogin={handleLogin}
+        onSwitchToSignup={() => setAuthPage('signup')}
+        authError={authError}
+      />
+    );
   }
+
   if (authPage === 'signup') {
-    return <Signup onSignup={handleSignup} onSwitchToLogin={() => setAuthPage('login')} />;
+    return (
+      <Signup
+        onSignup={handleSignup}
+        onSwitchToLogin={() => setAuthPage('login')}
+      />
+    );
   }
+
   if (authPage === 'verify-email') {
-    return <VerifyEmail email={unverifiedEmail} onBackToLogin={() => setAuthPage('login')} />;
+    return (
+      <VerifyEmail
+        email={unverifiedEmail}
+        onBackToLogin={() => setAuthPage('login')}
+      />
+    );
   }
 
   return (
@@ -864,7 +1002,7 @@ export default function App() {
         onAssignToProject={handleAssignToProject}
         onRemoveFromProject={handleRemoveFromProject}
       />
-      
+
       {currentPage === 'profile' ? (
         <UserProfile
           onBack={() => setCurrentPage('chat')}
@@ -893,11 +1031,10 @@ export default function App() {
             onSuggestionClick={handleSuggestionClick}
             onFeedback={handleFeedback}
           />
-          <RightPanel 
-            rightPanelContent={rightPanelContent} 
-          />
+          <RightPanel rightPanelContent={rightPanelContent} />
         </>
       )}
     </div>
   );
 }
+// Test restaurant
