@@ -25,7 +25,6 @@ import {
 import { fetchBehaviorSettings, updateBehaviorSettings, resolveEffectiveBehavior, upsertScopedBehavior, deleteScopedBehavior, DEFAULT_BEHAVIOR } from './services/behaviorService';
 import ScopedBehaviorPanel from './components/ScopedBehaviorPanel';
 import { insertFeedbackLog, updateFeedbackVote } from './services/feedbackLogService';
-import { analyzeConversationState, adaptBehavior } from './services/conversationStateService';
 import {
   fetchProjects,
   createProject,
@@ -690,14 +689,12 @@ export default function App() {
         resolveEffectiveBehavior(user.id, activeProjectId, convoId).catch(() => behaviorSettings),
         retrieveMemoryContext(convoId).catch(() => ''),
       ]);
-      const adaptedBehavior = adaptBehavior(effectiveBehavior, analyzeConversationState(context));
-
       let fullResponse = '';
       const validatorMeta = await sendMessage({
         messages: context,
         model: selectedModel,
         signal: controller.signal,
-        behavior: adaptedBehavior,
+        behavior: effectiveBehavior,
         memoryPrompt,
         onChunk: (chunk) => {
           fullResponse += chunk;
@@ -721,7 +718,7 @@ export default function App() {
         responseId:       assistantRow.id,
         userId:           user.id,
         conversationId:   convoId,
-        behaviorSnapshot: adaptedBehavior,
+        behaviorSnapshot: effectiveBehavior,
         validatorsRun:    validatorMeta?.validatorsRun    ?? [],
         validatorsPassed: validatorMeta?.validatorsPassed ?? true,
         repairsApplied:   validatorMeta?.repairsApplied   ?? [],
@@ -817,14 +814,12 @@ export default function App() {
         resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => behaviorSettings),
         retrieveMemoryContext(currentConversationId).catch(() => ''),
       ]);
-      const adaptedBehavior = adaptBehavior(effectiveBehavior, analyzeConversationState(context));
-
       let fullResponse = '';
       const validatorMeta = await sendMessage({
         messages: context,
         model: selectedModel,
         signal: controller.signal,
-        behavior: adaptedBehavior,
+        behavior: effectiveBehavior,
         memoryPrompt,
         onChunk: (chunk) => {
           fullResponse += chunk;
@@ -842,7 +837,7 @@ export default function App() {
         responseId:       assistantRow.id,
         userId:           user.id,
         conversationId:   currentConversationId,
-        behaviorSnapshot: adaptedBehavior,
+        behaviorSnapshot: effectiveBehavior,
         validatorsRun:    validatorMeta?.validatorsRun    ?? [],
         validatorsPassed: validatorMeta?.validatorsPassed ?? true,
         repairsApplied:   validatorMeta?.repairsApplied   ?? [],
@@ -916,14 +911,12 @@ export default function App() {
         resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => behaviorSettings),
         retrieveMemoryContext(currentConversationId).catch(() => ''),
       ]);
-      const adaptedBehavior = adaptBehavior(effectiveBehavior, analyzeConversationState(context));
-
       let fullResponse = '';
       const validatorMeta = await sendMessage({
         messages: context,
         model: selectedModel,
         signal: controller.signal,
-        behavior: adaptedBehavior,
+        behavior: effectiveBehavior,
         memoryPrompt,
         onChunk: (chunk) => {
           fullResponse += chunk;
@@ -941,7 +934,7 @@ export default function App() {
         responseId:       assistantRow.id,
         userId:           user.id,
         conversationId:   currentConversationId,
-        behaviorSnapshot: adaptedBehavior,
+        behaviorSnapshot: effectiveBehavior,
         validatorsRun:    validatorMeta?.validatorsRun    ?? [],
         validatorsPassed: validatorMeta?.validatorsPassed ?? true,
         repairsApplied:   validatorMeta?.repairsApplied   ?? [],
