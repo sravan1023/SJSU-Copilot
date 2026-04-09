@@ -117,7 +117,7 @@ async function repairResponse(repairPrompt, apiKey, modelId, signal) {
  * @param {AbortSignal} [options.signal] - optional abort signal
  * @returns {Promise<string>} final response text (may differ from streamed text after validation)
  */
-export async function sendMessage({ messages, model = '8b', onChunk, onReplace, signal, behavior }) {
+export async function sendMessage({ messages, model = '8b', onChunk, onReplace, signal, behavior, memoryPrompt }) {
   const apiKey = import.meta.env.VITE_GROQ_API_KEY;
   if (!apiKey) {
     throw new Error('VITE_GROQ_API_KEY is not set. Get a free key at https://console.groq.com');
@@ -126,9 +126,14 @@ export async function sendMessage({ messages, model = '8b', onChunk, onReplace, 
   const modelId = MODELS[model] || MODELS['8b'];
   const { temperature, max_tokens } = resolveParams(behavior);
 
+  let systemContent = buildSystemPrompt(behavior);
+  if (memoryPrompt) {
+    systemContent = memoryPrompt + '\n\n' + systemContent;
+  }
+
   const body = {
     model: modelId,
-    messages: [{ role: 'system', content: buildSystemPrompt(behavior) }, ...messages],
+    messages: [{ role: 'system', content: systemContent }, ...messages],
     stream: true,
     temperature,
     max_tokens,
