@@ -46,6 +46,13 @@ Thumbs.db
 *.sw?
 
 
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+
 # Misc
 coverage/
 .cache/
