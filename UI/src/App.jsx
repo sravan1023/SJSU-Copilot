@@ -22,7 +22,8 @@ import {
   deleteMessagesAfter,
   autoTitleIfNeeded,
 } from './services/chatService';
-import { fetchBehaviorSettings, updateBehaviorSettings, resolveEffectiveBehavior, DEFAULT_BEHAVIOR } from './services/behaviorService';
+import { fetchBehaviorSettings, updateBehaviorSettings, resolveEffectiveBehavior, upsertScopedBehavior, deleteScopedBehavior, DEFAULT_BEHAVIOR } from './services/behaviorService';
+import ScopedBehaviorPanel from './components/ScopedBehaviorPanel';
 import { insertFeedbackLog, updateFeedbackVote } from './services/feedbackLogService';
 import { analyzeConversationState, adaptBehavior } from './services/conversationStateService';
 import {
@@ -39,6 +40,7 @@ import {
   fetchNearbyRestaurants,
   formatRestaurantsMessage,
 } from './services/restaurantsService';
+import { retrieveMemoryContext, processMemoryExtraction } from './services/memoryService';
 
 export default function App() {
   const [authPage, setAuthPage] = useState('login');
@@ -185,6 +187,16 @@ export default function App() {
   // Behavior settings
   const [behaviorSettings, setBehaviorSettings] = useState(null);
 
+  // Scoped behavior panel state
+  const [scopedPanel, setScopedPanel] = useState({
+    open: false,
+    scope: null,          // 'project' | 'conversation'
+    scopeId: null,        // project_id or conversation_id
+    scopeLabel: '',       // display name
+  });
+  const [scopedBehavior, setScopedBehavior] = useState(null);        // the override row (null = no override)
+  const [activeBehaviorScope, setActiveBehaviorScope] = useState('user'); // 'user' | 'project' | 'conversation'
+
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
@@ -277,6 +289,103 @@ export default function App() {
     } catch (err) {
       console.error('Failed to update behavior settings:', err.message);
     }
+  };
+
+  // ── Scoped behavior panel helpers ──────────────────────────────────────────
+
+  // Detect which scope is active for the current conversation
+  useEffect(() => {
+    if (!user?.id || !currentConversationId) {
+      setActiveBehaviorScope('user');
+      return;
+    }
+    const detect = async () => {
+      try {
+        const { data } = await supabase
+          .from('behavior_settings')
+          .select('project_id, conversation_id')
+          .eq('user_id', user.id);
+        const rows = data || [];
+        if (rows.some(r => r.conversation_id === currentConversationId)) {
+          setActiveBehaviorScope('conversation');
+        } else if (activeProjectId && rows.some(r => r.project_id === activeProjectId && !r.conversation_id)) {
+          setActiveBehaviorScope('project');
+        } else {
+          setActiveBehaviorScope('user');
+        }
+      } catch {
+        setActiveBehaviorScope('user');
+      }
+    };
+    detect();
+  }, [user?.id, currentConversationId, activeProjectId, scopedPanel.open]);
+
+  const openScopedPanel = async (scope, scopeId, scopeLabel) => {
+    if (!user?.id) return;
+    // Fetch the existing override for this scope
+    try {
+      let query = supabase
+        .from('behavior_settings')
+        .select('response_tone, response_length, response_format, emoji_usage, priority_stack, project_id, conversation_id')
+        .eq('user_id', user.id);
+
+      if (scope === 'project') {
+        query = query.eq('project_id', scopeId).is('conversation_id', null);
+      } else {
+        query = query.eq('conversation_id', scopeId);
+      }
+
+      const { data } = await query.maybeSingle();
+      setScopedBehavior(data || null);
+    } catch {
+      setScopedBehavior(null);
+    }
+
+    setScopedPanel({ open: true, scope, scopeId, scopeLabel });
+  };
+
+  const handleSaveScopedBehavior = async (updates) => {
+    if (!user?.id || !scopedPanel.scopeId) return;
+    try {
+      const result = await upsertScopedBehavior(user.id, updates, {
+        projectId: scopedPanel.scope === 'project' ? scopedPanel.scopeId : null,
+        conversationId: scopedPanel.scope === 'conversation' ? scopedPanel.scopeId : null,
+      });
+      setScopedBehavior(result);
+    } catch (err) {
+      console.error('Failed to save scoped behavior:', err.message);
+    }
+  };
+
+  const handleDeleteScopedBehavior = async () => {
+    if (!user?.id || !scopedPanel.scopeId) return;
+    try {
+      await deleteScopedBehavior(user.id, {
+        projectId: scopedPanel.scope === 'project' ? scopedPanel.scopeId : null,
+        conversationId: scopedPanel.scope === 'conversation' ? scopedPanel.scopeId : null,
+      });
+      setScopedBehavior(null);
+    } catch (err) {
+      console.error('Failed to delete scoped behavior:', err.message);
+    }
+  };
+
+  const handleOpenProjectBehavior = (projectId, projectName) => {
+    openScopedPanel('project', projectId, projectName);
+  };
+
+  const handleOpenConversationBehavior = () => {
+    if (!currentConversationId) return;
+    const convo = conversations.find(c => c.id === currentConversationId);
+    // Also check project conversations
+    let title = convo?.title;
+    if (!title) {
+      for (const convos of Object.values(projectConversations)) {
+        const found = convos.find(c => c.id === currentConversationId);
+        if (found) { title = found.title; break; }
+      }
+    }
+    openScopedPanel('conversation', currentConversationId, title || 'Current Chat');
   };
 
   const loadProjectConvos = useCallback(async (projectId) => {
@@ -577,11 +686,10 @@ export default function App() {
       abortRef.current = controller;
 
       // Resolve scoped behavior (conversation > project > user > defaults)
-      const effectiveBehavior = await resolveEffectiveBehavior(
-        user.id,
-        activeProjectId,
-        convoId,
-      ).catch(() => behaviorSettings);
+      const [effectiveBehavior, memoryPrompt] = await Promise.all([
+        resolveEffectiveBehavior(user.id, activeProjectId, convoId).catch(() => behaviorSettings),
+        retrieveMemoryContext(convoId).catch(() => ''),
+      ]);
       const adaptedBehavior = adaptBehavior(effectiveBehavior, analyzeConversationState(context));
 
       let fullResponse = '';
@@ -590,6 +698,7 @@ export default function App() {
         model: selectedModel,
         signal: controller.signal,
         behavior: adaptedBehavior,
+        memoryPrompt,
         onChunk: (chunk) => {
           fullResponse += chunk;
           setMessages(prev =>
@@ -607,7 +716,7 @@ export default function App() {
       // Persist assistant message
       const assistantRow = await insertMessage({ conversationId: convoId, role: 'assistant', content: fullResponse });
 
-      // Fire-and-forget feedback log entry for this response
+      // Fire-and-forget: feedback log + memory extraction
       insertFeedbackLog({
         responseId:       assistantRow.id,
         userId:           user.id,
@@ -618,6 +727,8 @@ export default function App() {
         repairsApplied:   validatorMeta?.repairsApplied   ?? [],
         modelUsed:        selectedModel,
       }).catch(() => {});
+
+      processMemoryExtraction(convoId, assistantRow.id, userText, fullResponse).catch(() => {});
 
       // Replace temp message with persisted one
       setMessages(prev =>
@@ -701,12 +812,11 @@ export default function App() {
     abortRef.current = controller;
 
     try {
-      // Resolve scoped behavior for the current conversation/project
-      const effectiveBehavior = await resolveEffectiveBehavior(
-        user.id,
-        activeProjectId,
-        currentConversationId,
-      ).catch(() => behaviorSettings);
+      // Resolve scoped behavior and memory in parallel
+      const [effectiveBehavior, memoryPrompt] = await Promise.all([
+        resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => behaviorSettings),
+        retrieveMemoryContext(currentConversationId).catch(() => ''),
+      ]);
       const adaptedBehavior = adaptBehavior(effectiveBehavior, analyzeConversationState(context));
 
       let fullResponse = '';
@@ -715,6 +825,7 @@ export default function App() {
         model: selectedModel,
         signal: controller.signal,
         behavior: adaptedBehavior,
+        memoryPrompt,
         onChunk: (chunk) => {
           fullResponse += chunk;
           setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m));
@@ -737,6 +848,8 @@ export default function App() {
         repairsApplied:   validatorMeta?.repairsApplied   ?? [],
         modelUsed:        selectedModel,
       }).catch(() => {});
+
+      processMemoryExtraction(currentConversationId, assistantRow.id, userMsg.text, fullResponse).catch(() => {});
 
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m));
       loadConversations();
@@ -798,12 +911,11 @@ export default function App() {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      // Resolve scoped behavior for the current conversation/project
-      const effectiveBehavior = await resolveEffectiveBehavior(
-        user.id,
-        activeProjectId,
-        currentConversationId,
-      ).catch(() => behaviorSettings);
+      // Resolve scoped behavior and memory in parallel
+      const [effectiveBehavior, memoryPrompt] = await Promise.all([
+        resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => behaviorSettings),
+        retrieveMemoryContext(currentConversationId).catch(() => ''),
+      ]);
       const adaptedBehavior = adaptBehavior(effectiveBehavior, analyzeConversationState(context));
 
       let fullResponse = '';
@@ -812,6 +924,7 @@ export default function App() {
         model: selectedModel,
         signal: controller.signal,
         behavior: adaptedBehavior,
+        memoryPrompt,
         onChunk: (chunk) => {
           fullResponse += chunk;
           setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m));
@@ -834,6 +947,8 @@ export default function App() {
         repairsApplied:   validatorMeta?.repairsApplied   ?? [],
         modelUsed:        selectedModel,
       }).catch(() => {});
+
+      processMemoryExtraction(currentConversationId, assistantRow.id, newText, fullResponse).catch(() => {});
 
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m));
       loadConversations();
@@ -1001,6 +1116,7 @@ export default function App() {
         expandedProjects={expandedProjects}
         onAssignToProject={handleAssignToProject}
         onRemoveFromProject={handleRemoveFromProject}
+        onProjectBehaviorSettings={handleOpenProjectBehavior}
       />
 
       {currentPage === 'profile' ? (
@@ -1030,11 +1146,26 @@ export default function App() {
             onEditAndResubmit={handleEditAndResubmit}
             onSuggestionClick={handleSuggestionClick}
             onFeedback={handleFeedback}
+            onBehaviorSettings={handleOpenConversationBehavior}
+            hasConversation={!!currentConversationId}
+            activeBehaviorScope={activeBehaviorScope}
           />
           <RightPanel rightPanelContent={rightPanelContent} />
         </>
       )}
+
+      {/* Scoped Behavior Panel (project or conversation override) */}
+      <ScopedBehaviorPanel
+        open={scopedPanel.open}
+        onClose={() => setScopedPanel(prev => ({ ...prev, open: false }))}
+        scope={scopedPanel.scope}
+        scopeLabel={scopedPanel.scopeLabel}
+        scopeId={scopedPanel.scopeId}
+        globalBehavior={behaviorSettings || DEFAULT_BEHAVIOR}
+        scopedBehavior={scopedBehavior}
+        onSave={handleSaveScopedBehavior}
+        onDelete={handleDeleteScopedBehavior}
+      />
     </div>
   );
 }
-// Test restaurant

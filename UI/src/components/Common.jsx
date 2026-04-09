@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { MessageSquare, Link as LinkIcon, Pencil, Trash2, Check, X, ChevronRight, ChevronDown, FolderOpen, Plus, ArrowRightFromLine, ArrowRightToLine } from 'lucide-react';
+import { MessageSquare, Link as LinkIcon, Pencil, Trash2, Check, X, ChevronRight, ChevronDown, FolderOpen, Plus, ArrowRightFromLine, ArrowRightToLine, Sliders } from 'lucide-react';
 
 export function SuggestionCard({ title, subtitle, onClick }) {
     return (
@@ -175,6 +175,7 @@ export function ProjectItem({
     onRenameConversation,
     onDeleteConversation,
     onRemoveFromProject,
+    onBehaviorSettings,
 }) {
     const [renaming, setRenaming] = useState(false);
     const [renameValue, setRenameValue] = useState(name || '');
@@ -228,6 +229,13 @@ export function ProjectItem({
                                 title="New chat in project"
                             >
                                 <Plus size={13} />
+                            </button>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onBehaviorSettings?.(id, name); }}
+                                className="p-1 rounded-md hover:bg-white/15 text-sidebar-text-muted hover:text-sjsu-gold transition-colors"
+                                title="Project behavior settings"
+                            >
+                                <Sliders size={13} />
                             </button>
                             <button
                                 onClick={(e) => { e.stopPropagation(); setRenameValue(name || ''); setRenaming(true); }}

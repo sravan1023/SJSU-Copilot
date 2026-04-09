@@ -43,6 +43,7 @@ export default function Sidebar({
   expandedProjects = {},
   onAssignToProject,
   onRemoveFromProject,
+  onProjectBehaviorSettings,
 }) {
   const scrollRef = useRef(null);
   const [creatingProject, setCreatingProject] = useState(false);
@@ -166,6 +167,7 @@ export default function Sidebar({
                 onRenameConversation={onRenameConversation}
                 onDeleteConversation={onDeleteConversation}
                 onRemoveFromProject={onRemoveFromProject}
+                onBehaviorSettings={onProjectBehaviorSettings}
               />
             ))}
             {projects.length === 0 && !creatingProject && (
