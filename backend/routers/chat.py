@@ -3,7 +3,12 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from services.llm import stream_chat, generate_title
-from services.conversation_state import analyze_conversation_state, adapt_behavior
+from services.conversation_state import (
+    analyze_conversation_state,
+    generate_default_behavior,
+    merge_behavior,
+    adapt_behavior,
+)
 
 router = APIRouter(tags=["chat"])
 
@@ -20,6 +25,10 @@ class ChatRequest(BaseModel):
     memory_prompt: str | None = None
 
 
+class AutoBehaviorRequest(BaseModel):
+    messages: list[Message]
+
+
 class TitleRequest(BaseModel):
     message: str
 
@@ -28,11 +37,17 @@ class TitleRequest(BaseModel):
 async def chat(req: ChatRequest):
     messages = [m.model_dump() for m in req.messages]
 
-    # Adapt behavior based on conversation state
-    behavior = req.behavior
-    if behavior:
-        state = analyze_conversation_state(messages)
-        behavior = adapt_behavior(behavior, state)
+    # 1. Analyze conversation state
+    state = analyze_conversation_state(messages)
+
+    # 2. Auto-detect baseline behavior
+    auto_behavior = generate_default_behavior(state)
+
+    # 3. Merge manual overrides (if any) on top of auto
+    behavior = merge_behavior(auto_behavior, req.behavior)
+
+    # 4. Adapt to conversation context
+    behavior = adapt_behavior(behavior, state)
 
     return StreamingResponse(
         stream_chat(
@@ -47,6 +62,18 @@ async def chat(req: ChatRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/auto-behavior")
+async def auto_behavior(req: AutoBehaviorRequest):
+    """Return what the backend auto-detected for this conversation."""
+    messages = [m.model_dump() for m in req.messages]
+    state = analyze_conversation_state(messages)
+    behavior = generate_default_behavior(state)
+    return {
+        "behavior": behavior,
+        "state": state,
+    }
 
 
 @router.post("/generate-title")
