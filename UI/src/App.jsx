@@ -9,7 +9,6 @@ import Signup from './components/Signup';
 import VerifyEmail from './components/VerifyEmail';
 import { supabase } from './supabaseClient';
 import { ensureProfile } from './supabaseHelpers';
-import { runDueJobFetchCycle } from './services/jobFetcher';
 import { sendMessage, generateTitle, fetchAutoBehavior } from './services/llamaService';
 import {
   fetchConversations,
@@ -214,11 +213,12 @@ export default function App() {
     const schedulerMs = Number(import.meta.env.VITE_JOB_FETCHER_SCHEDULER_MS || 300000);
     let running = false;
 
+    const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
     const runCycle = async () => {
       if (running) return;
       running = true;
       try {
-        await runDueJobFetchCycle({ userId: user.id });
+        await fetch(`${API_BASE}/api/jobs/fetch`, { method: 'POST' });
       } catch (error) {
         console.error('Job scheduler cycle failed:', error?.message || error);
       } finally {

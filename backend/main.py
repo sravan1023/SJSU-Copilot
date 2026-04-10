@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
-from routers import chat, professors
+from routers import chat, professors, jobs
 
 app = FastAPI(title="SJSU Copilot API")
 
@@ -18,6 +18,7 @@ app.add_middleware(
 
 app.include_router(chat.router, prefix="/api")
 app.include_router(professors.router, prefix="/api")
+app.include_router(jobs.router, prefix="/api")
 
 
 @app.get("/")
