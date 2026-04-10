@@ -10,7 +10,7 @@ import VerifyEmail from './components/VerifyEmail';
 import { supabase } from './supabaseClient';
 import { ensureProfile } from './supabaseHelpers';
 import { runDueJobFetchCycle } from './services/jobFetcher';
-import { sendMessage, generateTitle } from './services/llamaService';
+import { sendMessage, generateTitle, fetchAutoBehavior } from './services/llamaService';
 import {
   fetchConversations,
   createConversation,
@@ -195,6 +195,7 @@ export default function App() {
   });
   const [scopedBehavior, setScopedBehavior] = useState(null);        // the override row (null = no override)
   const [activeBehaviorScope, setActiveBehaviorScope] = useState('user'); // 'user' | 'project' | 'conversation'
+  const [autoBehavior, setAutoBehavior] = useState(null);            // auto-detected behavior from backend
 
   useEffect(() => {
     if (isDarkMode) {
@@ -275,8 +276,8 @@ export default function App() {
     fetchBehaviorSettings(user.id)
       .then(setBehaviorSettings)
       .catch(err => {
-        console.warn('Failed to load behavior settings, using defaults:', err.message);
-        setBehaviorSettings({ ...DEFAULT_BEHAVIOR });
+        console.warn('Failed to load behavior settings, using empty overrides:', err.message);
+        setBehaviorSettings({});
       });
   }, [user?.id]);
 
@@ -341,6 +342,17 @@ export default function App() {
     }
 
     setScopedPanel({ open: true, scope, scopeId, scopeLabel });
+
+    // Fetch auto-detected behavior for this conversation's context
+    const context = messages.slice(-20).map(m => ({
+      role: m.sender === 'user' ? 'user' : 'assistant',
+      content: m.text,
+    }));
+    if (context.length > 0) {
+      fetchAutoBehavior(context).then(result => {
+        if (result?.behavior) setAutoBehavior(result.behavior);
+      }).catch(() => {});
+    }
   };
 
   const handleSaveScopedBehavior = async (updates) => {
@@ -684,9 +696,9 @@ export default function App() {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      // Resolve scoped behavior (conversation > project > user > defaults)
-      const [effectiveBehavior, memoryPrompt] = await Promise.all([
-        resolveEffectiveBehavior(user.id, activeProjectId, convoId).catch(() => behaviorSettings),
+      // Resolve manual overrides + memory in parallel
+      const [manualBehavior, memoryPrompt] = await Promise.all([
+        resolveEffectiveBehavior(user.id, activeProjectId, convoId).catch(() => null),
         retrieveMemoryContext(convoId).catch(() => ''),
       ]);
       let fullResponse = '';
@@ -694,7 +706,7 @@ export default function App() {
         messages: context,
         model: selectedModel,
         signal: controller.signal,
-        behavior: effectiveBehavior,
+        behavior: manualBehavior,
         memoryPrompt,
         onChunk: (chunk) => {
           fullResponse += chunk;
@@ -718,7 +730,7 @@ export default function App() {
         responseId:       assistantRow.id,
         userId:           user.id,
         conversationId:   convoId,
-        behaviorSnapshot: effectiveBehavior,
+        behaviorSnapshot: manualBehavior,
         validatorsRun:    validatorMeta?.validatorsRun    ?? [],
         validatorsPassed: validatorMeta?.validatorsPassed ?? true,
         repairsApplied:   validatorMeta?.repairsApplied   ?? [],
@@ -787,7 +799,9 @@ export default function App() {
     ) {
       try {
         await deleteMessage(botMsg.id);
-      } catch {}
+      } catch {
+        // best-effort delete; continue regenerating even if the row is gone
+      }
     }
 
     setMessages(prev => prev.filter(m => m.id !== botMsg.id));
@@ -809,9 +823,9 @@ export default function App() {
     abortRef.current = controller;
 
     try {
-      // Resolve scoped behavior and memory in parallel
-      const [effectiveBehavior, memoryPrompt] = await Promise.all([
-        resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => behaviorSettings),
+      // Resolve manual overrides + memory in parallel
+      const [manualBehavior, memoryPrompt] = await Promise.all([
+        resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => null),
         retrieveMemoryContext(currentConversationId).catch(() => ''),
       ]);
       let fullResponse = '';
@@ -819,7 +833,7 @@ export default function App() {
         messages: context,
         model: selectedModel,
         signal: controller.signal,
-        behavior: effectiveBehavior,
+        behavior: manualBehavior,
         memoryPrompt,
         onChunk: (chunk) => {
           fullResponse += chunk;
@@ -837,7 +851,7 @@ export default function App() {
         responseId:       assistantRow.id,
         userId:           user.id,
         conversationId:   currentConversationId,
-        behaviorSnapshot: effectiveBehavior,
+        behaviorSnapshot: manualBehavior,
         validatorsRun:    validatorMeta?.validatorsRun    ?? [],
         validatorsPassed: validatorMeta?.validatorsPassed ?? true,
         repairsApplied:   validatorMeta?.repairsApplied   ?? [],
@@ -871,7 +885,9 @@ export default function App() {
     if (originalMsg.created_at) {
       try {
         await deleteMessagesAfter(currentConversationId, originalMsg.created_at);
-      } catch {}
+      } catch {
+        // best-effort cleanup; local state is the source of truth here
+      }
     }
 
     const preceding = messages.slice(0, msgIdx);
@@ -906,9 +922,9 @@ export default function App() {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      // Resolve scoped behavior and memory in parallel
-      const [effectiveBehavior, memoryPrompt] = await Promise.all([
-        resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => behaviorSettings),
+      // Resolve manual overrides + memory in parallel
+      const [manualBehavior, memoryPrompt] = await Promise.all([
+        resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => null),
         retrieveMemoryContext(currentConversationId).catch(() => ''),
       ]);
       let fullResponse = '';
@@ -916,7 +932,7 @@ export default function App() {
         messages: context,
         model: selectedModel,
         signal: controller.signal,
-        behavior: effectiveBehavior,
+        behavior: manualBehavior,
         memoryPrompt,
         onChunk: (chunk) => {
           fullResponse += chunk;
@@ -934,7 +950,7 @@ export default function App() {
         responseId:       assistantRow.id,
         userId:           user.id,
         conversationId:   currentConversationId,
-        behaviorSnapshot: effectiveBehavior,
+        behaviorSnapshot: manualBehavior,
         validatorsRun:    validatorMeta?.validatorsRun    ?? [],
         validatorsPassed: validatorMeta?.validatorsPassed ?? true,
         repairsApplied:   validatorMeta?.repairsApplied   ?? [],
@@ -1118,6 +1134,7 @@ export default function App() {
           user={user}
           behaviorSettings={behaviorSettings}
           onUpdateBehavior={handleUpdateBehavior}
+          autoBehavior={autoBehavior}
         />
       ) : currentPage === 'intern-alerts' ? (
         <InternJobsAlertsPage onBack={() => setCurrentPage('chat')} />
@@ -1154,7 +1171,7 @@ export default function App() {
         scope={scopedPanel.scope}
         scopeLabel={scopedPanel.scopeLabel}
         scopeId={scopedPanel.scopeId}
-        globalBehavior={behaviorSettings || DEFAULT_BEHAVIOR}
+        autoBehavior={autoBehavior || { ...DEFAULT_BEHAVIOR, ...(behaviorSettings || {}) }}
         scopedBehavior={scopedBehavior}
         onSave={handleSaveScopedBehavior}
         onDelete={handleDeleteScopedBehavior}
