@@ -113,4 +113,25 @@ export async function generateTitle(userMessage) {
   }
 }
 
+/**
+ * Fetch the auto-detected behavior for a conversation.
+ * Used by behavior panels to show the baseline.
+ */
+export async function fetchAutoBehavior(messages) {
+  try {
+    const res = await fetch(`${API_BASE}/api/auto-behavior`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages }),
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 export { MODELS };
