@@ -6,7 +6,7 @@ type JobQuery = {
 
 type JobSource = {
   name: string;
-  type: 'remoteok' | 'remotive' | 'arbeitnow' | 'greenhouse' | 'lever';
+  type: 'remoteok' | 'remotive' | 'arbeitnow' | 'themuse' | 'greenhouse' | 'lever';
   url: string;
 };
 
@@ -39,6 +39,7 @@ const SOURCES: JobSource[] = [
   { name: 'RemoteOK', type: 'remoteok', url: 'https://remoteok.com/api' },
   { name: 'Remotive', type: 'remotive', url: 'https://remotive.com/api/remote-jobs' },
   { name: 'Arbeitnow', type: 'arbeitnow', url: 'https://www.arbeitnow.com/api/job-board-api' },
+  { name: 'The Muse', type: 'themuse', url: 'https://www.themuse.com/api/public/jobs' },
 ];
 
 const json = (data: unknown, init: ResponseInit = {}) =>
@@ -173,8 +174,53 @@ const normalizeArbeitnow = async (body: any, source: JobSource): Promise<Normali
   );
 };
 
-const fetchSource = async (source: JobSource) => {
-  const response = await fetch(source.url, {
+const normalizeTheMuse = async (body: any, source: JobSource): Promise<NormalizedJob[]> => {
+  const jobs = Array.isArray(body.results) ? body.results : [];
+  return Promise.all(
+    jobs.map(async (row: any) => {
+      const locations = Array.isArray(row.locations) ? row.locations.map((l: any) => l.name).join(', ') : '';
+      const levels = Array.isArray(row.levels) ? row.levels.map((l: any) => l.name).join(' ') : '';
+      const categories = Array.isArray(row.categories) ? row.categories.map((c: any) => c.name).join(', ') : '';
+      const tags = Array.isArray(row.tags) ? row.tags.map((t: any) => (t.name || t).toString().toLowerCase()) : [];
+      if (categories) tags.push(...categories.toLowerCase().split(', '));
+
+      return {
+        id: String(row.id || ''),
+        dedupe_hash: await buildDedupeHash(String(row.name || ''), String(row.company?.name || '')),
+        title: row.name || '',
+        company: row.company?.name || '',
+        location: locations || null,
+        remote_status: normalizeRemoteStatus(locations || ''),
+        job_type: normalizeJobType(`${levels} ${row.name || ''}`),
+        salary: null,
+        experience_level: levels || null,
+        tags,
+        description: cleanHtml(row.contents || ''),
+        apply_url: row.refs?.landing_page || '',
+        source_name: source.name,
+        source_url: source.url,
+        posted_date: row.publication_date ? String(row.publication_date).slice(0, 10) : null,
+        fetched_at: new Date().toISOString(),
+      };
+    }),
+  );
+};
+
+const fetchSource = async (source: JobSource, query?: JobQuery) => {
+  let url = source.url;
+
+  // The Muse supports level + page params for internship/entry-level filtering
+  if (source.type === 'themuse') {
+    if (query?.experienceLevel === 'new-grad') {
+      url = `${source.url}?level=Entry%20Level&page=0`;
+    } else if (query?.experienceLevel === 'intern') {
+      url = `${source.url}?level=Internship&page=0`;
+    } else {
+      url = `${source.url}?level=Internship&level=Entry%20Level&page=0`;
+    }
+  }
+
+  const response = await fetch(url, {
     headers: {
       'user-agent': 'SJSU-Job-Fetcher/1.0',
       accept: 'application/json,text/plain,*/*',
@@ -190,6 +236,8 @@ const fetchSource = async (source: JobSource) => {
       return normalizeRemotive(body, source);
     case 'arbeitnow':
       return normalizeArbeitnow(body, source);
+    case 'themuse':
+      return normalizeTheMuse(body, source);
     default:
       return [];
   }
@@ -223,7 +271,7 @@ async function handleFetch(request: Request) {
     experienceLevel: url.searchParams.get('experienceLevel') || undefined,
   };
 
-  const sourceResults = await Promise.allSettled(SOURCES.map((source) => fetchSource(source)));
+  const sourceResults = await Promise.allSettled(SOURCES.map((source) => fetchSource(source, query)));
   const jobs = sourceResults
     .flatMap((result, index) => (result.status === 'fulfilled' ? result.value : []))
     .filter(Boolean) as NormalizedJob[];
