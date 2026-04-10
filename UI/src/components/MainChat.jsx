@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Code2,
   Sliders,
+  Sparkles,
 } from 'lucide-react';
 import { SuggestionCard } from './Common';
 
@@ -240,24 +241,34 @@ export default function MainChat({
       {/* Top Navigation */}
       <header className="flex items-center justify-between px-10 py-5 z-10 transition-colors duration-300">
         <div className="flex items-center gap-4 ml-auto">
-          {hasConversation && (
-            <button
-              onClick={onBehaviorSettings}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                activeBehaviorScope === 'conversation'
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
-                  : activeBehaviorScope === 'project'
-                    ? 'bg-sjsu-gold/10 border-sjsu-gold/30 text-sjsu-gold'
-                    : 'bg-bg-surface border-border-color text-text-secondary hover:text-text-primary hover:border-text-secondary/30'
-              }`}
-              title="Conversation behavior settings"
-            >
-              <Sliders size={14} />
-              <span className="hidden sm:inline">
-                {activeBehaviorScope === 'conversation' ? 'Chat Override' : activeBehaviorScope === 'project' ? 'Project Override' : 'Behavior'}
-              </span>
-            </button>
-          )}
+          {hasConversation && (() => {
+            const isConvo = activeBehaviorScope === 'conversation';
+            const isProject = activeBehaviorScope === 'project';
+            const isAuto = !isConvo && !isProject;
+            const ScopeIcon = isAuto ? Sparkles : Sliders;
+            return (
+              <button
+                onClick={onBehaviorSettings}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                  isConvo
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
+                    : isProject
+                      ? 'bg-sjsu-gold/10 border-sjsu-gold/30 text-sjsu-gold'
+                      : 'bg-violet-500/5 border-violet-500/20 text-violet-400 hover:bg-violet-500/10'
+                }`}
+                title={
+                  isConvo ? 'Manual override active for this chat — click to edit'
+                  : isProject ? 'Manual override active for this project — click to edit'
+                  : 'Auto-adapted to your conversation — click to override'
+                }
+              >
+                <ScopeIcon size={14} />
+                <span className="hidden sm:inline">
+                  {isConvo ? 'Chat Override' : isProject ? 'Project Override' : 'Auto'}
+                </span>
+              </button>
+            );
+          })()}
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
