@@ -10,12 +10,12 @@ import re
 CONCISE_WORD_LIMIT = 350
 
 DOMAIN_WARNING = (
-    "\n\n---\n⚠️ *This response may contain medical, legal, or financial information. "
+    "\n\n---\n*This response may contain medical, legal, or financial information. "
     "Please consult a qualified professional before making any decisions.*"
 )
 
 UNVERIFIED_WARNING = (
-    "\n\n---\n⚠️ *Some claims in this response may not be fully verified. "
+    "\n\n---\n*Some claims in this response may not be fully verified. "
     "Please double-check important information.*"
 )
 
