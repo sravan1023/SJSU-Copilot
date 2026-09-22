@@ -32,6 +32,8 @@ export interface TurnTiming {
 /** Absolute performance.now() marks from llamaService.sendMessage. */
 export interface StreamTimings {
   send?: number;
+  /** After the access token was resolved, before the fetch. Usually ~0. */
+  auth?: number;
   headers?: number;
   firstStatus?: number;
   firstToken?: number;
@@ -40,6 +42,7 @@ export interface StreamTimings {
 
 const STREAM_MARKS: Array<[keyof StreamTimings, string]> = [
   ['send', 'request_sent'],
+  ['auth', 'auth_token'],
   ['headers', 'headers'],
   ['firstStatus', 'first_status'],
   ['firstToken', 'first_token'],

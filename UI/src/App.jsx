@@ -11,6 +11,7 @@ import { supabase } from './supabaseClient';
 import { ensureProfile } from './supabaseHelpers';
 import { sendMessage, generateTitle, fetchAutoBehavior, DEFAULT_MODEL_KEY } from './services/llamaService';
 import { startTurn } from './services/telemetryService';
+import { primeAuthToken, clearAuthToken, getAuthToken } from './services/authToken';
 import {
   fetchConversations,
   createConversation,
@@ -59,6 +60,9 @@ export default function App() {
       try {
         const sessionRes = await withTimeout(supabase.auth.getSession(), 'Auth session check');
         const session = sessionRes?.data?.session;
+        // The only getSession() call in the app. It used to read .user and drop
+        // the token; the backend needs it on every request now.
+        primeAuthToken(session ?? null);
 
         if (session?.user) {
           if (!session.user.email?.endsWith('@sjsu.edu')) {
@@ -110,6 +114,12 @@ export default function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      // First, before any early return below. This callback sees every session
+      // supabase-js produces -- sign-in, sign-out and TOKEN_REFRESHED alike --
+      // which is what keeps the cached token fresh without polling. A sign-out
+      // arrives here with a null session and clears it.
+      primeAuthToken(session ?? null);
+
       try {
         if (session?.user) {
           if (session.user.email && !session.user.email.endsWith('@sjsu.edu')) {
@@ -219,7 +229,17 @@ export default function App() {
       if (running) return;
       running = true;
       try {
-        await fetch(`${API_BASE}/api/jobs/fetch`, { method: 'POST' });
+        const token = await getAuthToken();
+        const res = await fetch(`${API_BASE}/api/jobs/fetch`, {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        // This endpoint now needs a 'run_jobs' grant in admin_grants, which is
+        // seeded by hand. Without the check a 403 (no grant) or 503 (grants
+        // unreadable) would be indistinguishable from a working scheduler.
+        if (!res.ok) {
+          console.error('Job scheduler cycle rejected:', res.status);
+        }
       } catch (error) {
         console.error('Job scheduler cycle failed:', error?.message || error);
       } finally {
@@ -1128,6 +1148,10 @@ export default function App() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    // signOut() fires SIGNED_OUT with a null session, which clears this too --
+    // but it can fail on a network error while the local state is cleared
+    // regardless, and a stale token must not outlive the session.
+    clearAuthToken();
     setUser(null);
     setAuthPage('login');
     setMessages([]);

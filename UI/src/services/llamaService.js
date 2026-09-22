@@ -5,6 +5,8 @@
  * post-generation validation, and repair rewrites.
  */
 
+import { authedJsonHeaders } from './authToken';
+
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
 /**
@@ -82,9 +84,15 @@ export async function sendMessage({ messages, model = DEFAULT_MODEL_KEY, onChunk
   // browser waits for response headers, which is where retrieval used to sit.
   const timings = { send: performance.now() };
 
+  // Normally a cache read costing one microtask. It only awaits real work when
+  // the token is near expiry, and `auth` is marked so that cost shows up as
+  // itself rather than inflating the `headers` dead-air metric below.
+  const headers = await authedJsonHeaders();
+  timings.auth = performance.now();
+
   const res = await fetch(`${API_BASE}/api/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({
       messages,
       model,
@@ -182,7 +190,7 @@ export async function generateTitle(userMessage) {
   try {
     const res = await fetch(`${API_BASE}/api/generate-title`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authedJsonHeaders(),
       body: JSON.stringify({ message: userMessage }),
     });
 
@@ -203,7 +211,7 @@ export async function fetchAutoBehavior(messages) {
   try {
     const res = await fetch(`${API_BASE}/api/auto-behavior`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authedJsonHeaders(),
       body: JSON.stringify({ messages }),
     });
 
