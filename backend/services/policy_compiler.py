@@ -68,12 +68,6 @@ def _priority_text(key: str, rank: int) -> str | None:
     }
     return mapping.get(key)
 
-PRIORITY_CONFLICTS = {
-    "accuracy": "speed",
-    "speed": "accuracy",
-    "clarity": "academic",
-}
-
 # -- Style -> instruction text (Soft) ---
 
 STYLE_INSTRUCTIONS = {

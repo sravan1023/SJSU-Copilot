@@ -1,4 +1,4 @@
-import os
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
@@ -10,6 +10,9 @@ router = APIRouter(tags=["professors"])
 DATA_PATH = Path(__file__).resolve().parent.parent / "data.xlsx"
 
 
+# The spreadsheet used to be re-read with pandas on every request. It is read
+# once, on first use, and kept; edits to data.xlsx take effect on restart.
+@lru_cache(maxsize=1)
 def _load_data() -> pd.DataFrame:
     return pd.read_excel(DATA_PATH, header=1)
 

@@ -674,19 +674,6 @@ async def _get_job_sources(client: httpx.AsyncClient) -> list[dict]:
     return resp.json()
 
 
-async def _get_existing_matches(client: httpx.AsyncClient, dedupe_hashes: list[str]) -> list[dict]:
-    if not dedupe_hashes:
-        return []
-    resp = await client.get(
-        f"{SUPABASE_URL}/rest/v1/job_listings",
-        params={"select": "id,apply_url,dedupe_hash", "dedupe_hash": f"in.({','.join(dedupe_hashes)})"},
-        headers=_sb_headers(),
-        timeout=10.0,
-    )
-    resp.raise_for_status()
-    return resp.json()
-
-
 async def _insert_job_listings(client: httpx.AsyncClient, rows: list[dict]) -> list[dict]:
     if not rows:
         return []
