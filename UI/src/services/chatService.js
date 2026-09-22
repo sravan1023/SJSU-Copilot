@@ -95,7 +95,10 @@ export async function fetchMessages({ conversationId, limit = 30, cursor = null 
 }
 
 /**
- * Insert a single message and update the parent conversation.
+ * Insert a single message. The parent conversation's last_message_preview and
+ * updated_at are set by the trg_set_conversation_preview trigger
+ * (supabase/migrations/20260916000500_message_preview_trigger.sql), so this is
+ * one round trip rather than two.
  */
 export async function insertMessage({ conversationId, role, content }) {
   const { data, error } = await supabase
@@ -108,16 +111,6 @@ export async function insertMessage({ conversationId, role, content }) {
     .select()
     .single();
   if (error) throw error;
-
-  const preview = content.length > 80 ? content.slice(0, 80) + '...' : content;
-  await supabase
-    .from('conversations')
-    .update({
-      last_message_preview: preview,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', conversationId);
-
   return data;
 }
 
@@ -160,7 +153,7 @@ export async function autoTitleIfNeeded(conversationId, firstUserMessage, titleG
     .eq('id', conversationId)
     .single();
 
-  if (convo?.title) return; // already titled
+  if (convo?.title) return null; // already titled
 
   // Try AI-generated title, fall back to truncated message
   let title = null;
@@ -182,4 +175,7 @@ export async function autoTitleIfNeeded(conversationId, firstUserMessage, titleG
     .from('conversations')
     .update({ title })
     .eq('id', conversationId);
+
+  // Returned so callers can patch their local list instead of refetching it.
+  return title;
 }

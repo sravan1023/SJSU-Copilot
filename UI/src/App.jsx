@@ -9,7 +9,8 @@ import Signup from './components/Signup';
 import VerifyEmail from './components/VerifyEmail';
 import { supabase } from './supabaseClient';
 import { ensureProfile } from './supabaseHelpers';
-import { sendMessage, generateTitle, fetchAutoBehavior } from './services/llamaService';
+import { sendMessage, generateTitle, fetchAutoBehavior, DEFAULT_MODEL_KEY } from './services/llamaService';
+import { startTurn } from './services/telemetryService';
 import {
   fetchConversations,
   createConversation,
@@ -34,10 +35,6 @@ import {
   unassignConversationFromProject,
 } from './services/projectService';
 import './App.css';
-import {
-  fetchNearbyRestaurants,
-  formatRestaurantsMessage,
-} from './services/restaurantsService';
 import { retrieveMemoryContext, processMemoryExtraction } from './services/memoryService';
 
 export default function App() {
@@ -165,13 +162,16 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState('chat');
   const [rightPanelContent, setRightPanelContent] = useState('empty');
   const [rightPanelLinks, setRightPanelLinks] = useState([]);
-  const [selectedModel, setSelectedModel] = useState('8b');
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL_KEY);
 
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  // Backend progress key ('received' | 'searching' | 'generating') shown while
+  // waiting for the first answer token. MainChat maps it to display text.
+  const [streamStatus, setStreamStatus] = useState(null);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [hasMoreConversations, setHasMoreConversations] = useState(false);
@@ -250,6 +250,36 @@ export default function App() {
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
+
+  /**
+   * Patch one conversation in the local lists and move it to the top.
+   *
+   * Refetching the entire sidebar after every message — which is what this
+   * replaces — was a round trip to restate what we already knew locally.
+   */
+  const patchConversation = useCallback((convoId, patch) => {
+    const apply = (list) => {
+      const idx = list.findIndex(c => c.id === convoId);
+      if (idx === -1) return list;
+      const updated = { ...list[idx], ...patch };
+      return [updated, ...list.slice(0, idx), ...list.slice(idx + 1)];
+    };
+
+    setConversations(apply);
+    setProjectConversations(prev => {
+      let changed = false;
+      const next = {};
+      for (const [projectId, list] of Object.entries(prev)) {
+        const applied = apply(list);
+        if (applied !== list) changed = true;
+        next[projectId] = applied;
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  /** Mirror what chatService.insertMessage writes to last_message_preview. */
+  const previewFor = (text) => (text.length > 80 ? text.slice(0, 80) + '...' : text);
 
   const loadMoreConversations = useCallback(() => {
     if (!hasMoreConversations || !conversations.length) return;
@@ -547,37 +577,33 @@ export default function App() {
     if (!loadingMessages) scrollToBottom();
   }, [messages, loadingMessages]);
 
-  const isRestaurantQuery = (text) => {
-    const q = text.toLowerCase().trim();
-
-    return (
-      q.includes('restaurant') ||
-      q.includes('restaurants') ||
-      q.includes('food') ||
-      q.includes('eat') ||
-      q.includes('lunch') ||
-      q.includes('dinner') ||
-      q.includes('breakfast') ||
-      q.includes('cafe') ||
-      q.includes('hungry') ||
-      q.includes('places to eat') ||
-      q.includes('near by restaurants') ||
-      q.includes('nearby restaurants')
-    );
-  };
-
   const handleSend = async () => {
     if (!input.trim() || !user?.id) return;
+    const turn = startTurn('send');
 
     const userText = input.trim();
-    const restaurantMode = isRestaurantQuery(userText);
 
     setInput('');
     setIsTyping(true);
+    setStreamStatus('received');
     setRightPanelContent('empty');
     setRightPanelLinks([]);
 
     try {
+      // Echo the user's own message before touching the network. This used to
+      // sit behind two awaited Supabase round trips (create conversation, then
+      // insert message + preview update), so the message the user just typed
+      // took 2-3 network hops to appear.
+      const tempUserId = `temp-user-${Date.now()}`;
+      const userMsg = {
+        id: tempUserId,
+        text: userText,
+        sender: 'user',
+        created_at: new Date().toISOString(),
+      };
+      setMessages(prev => [...prev, userMsg]);
+      turn.mark('ack');
+
       let convoId = currentConversationId;
 
       if (!convoId) {
@@ -595,98 +621,41 @@ export default function App() {
         }
       }
 
-      const userRow = await insertMessage({
+      // Save the user's message alongside the chat request rather than before
+      // it: the model doesn't need the saved row, and awaiting it here added
+      // 200-600 ms to every answer. It is awaited before the assistant's row is
+      // inserted, so the two still land in order.
+      const userSave = insertMessage({
         conversationId: convoId,
         role: 'user',
         content: userText,
+      }).then(userRow => {
+        turn.mark('user_saved');
+
+        // Reconcile the optimistic row with the persisted one.
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === tempUserId
+              ? { ...m, id: userRow.id, created_at: userRow.created_at }
+              : m
+          )
+        );
+        patchConversation(convoId, {
+          last_message_preview: previewFor(userText),
+          updated_at: userRow.created_at,
+        });
+
+        autoTitleIfNeeded(convoId, userText, generateTitle)
+          .then(title => {
+            if (title) patchConversation(convoId, { title });
+          })
+          .catch(() => {});
+
+        return userRow;
       });
-
-      const userMsg = {
-        id: userRow.id,
-        text: userText,
-        sender: 'user',
-        created_at: userRow.created_at,
-      };
-
-      setMessages(prev => [...prev, userMsg]);
-
-      autoTitleIfNeeded(convoId, userText, generateTitle)
-        .then(() => loadConversations())
-        .catch(() => {});
-
-      if (restaurantMode) {
-        const tempId = `temp-${Date.now()}`;
-
-        setMessages(prev => [
-          ...prev,
-          {
-            id: tempId,
-            text: '🔍 Finding restaurants near SJSU...',
-            sender: 'bot',
-          },
-        ]);
-
-        try {
-          const restaurants = await fetchNearbyRestaurants();
-          const restaurantReply = formatRestaurantsMessage(restaurants);
-
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === tempId ? { ...m, text: restaurantReply } : m
-            )
-          );
-
-          const assistantRow = await insertMessage({
-            conversationId: convoId,
-            role: 'assistant',
-            content: restaurantReply,
-          });
-
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === tempId
-                ? {
-                    ...m,
-                    id: assistantRow.id,
-                    created_at: assistantRow.created_at,
-                  }
-                : m
-            )
-          );
-
-          loadConversations();
-          return;
-        } catch (error) {
-          const fallback = `**Error:** ${error.message || 'Could not fetch nearby restaurants.'}`;
-
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === tempId ? { ...m, text: fallback } : m
-            )
-          );
-
-          const assistantRow = await insertMessage({
-            conversationId: convoId,
-            role: 'assistant',
-            content: fallback,
-          });
-
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === tempId
-                ? {
-                    ...m,
-                    id: assistantRow.id,
-                    created_at: assistantRow.created_at,
-                  }
-                : m
-            )
-          );
-
-          loadConversations();
-          return;
-        }
-      }
+      // Handled when awaited below; this only stops an early failure from being
+      // reported as unhandled while the answer streams.
+      userSave.catch(() => {});
 
       const currentMessages = [...messages, userMsg];
       const context = currentMessages.slice(-20).map(m => ({
@@ -706,6 +675,7 @@ export default function App() {
         resolveEffectiveBehavior(user.id, activeProjectId, convoId).catch(() => null),
         retrieveMemoryContext(convoId).catch(() => ''),
       ]);
+      turn.mark('context_ready');
       let fullResponse = '';
       const assistantMeta = await sendMessage({
         messages: context,
@@ -713,6 +683,7 @@ export default function App() {
         signal: controller.signal,
         behavior: manualBehavior,
         memoryPrompt,
+        onStatus: setStreamStatus,
         onChunk: (chunk) => {
           fullResponse += chunk;
           setMessages(prev =>
@@ -731,12 +702,14 @@ export default function App() {
       setRightPanelLinks(sources);
       setRightPanelContent(sources.length > 0 ? 'links' : 'empty');
 
-      // Persist assistant message
+      // Persist assistant message, after the user's (created_at orders the thread).
+      await userSave;
       const assistantRow = await insertMessage({
         conversationId: convoId,
         role: 'assistant',
         content: fullResponse,
       });
+      turn.mark('assistant_saved');
 
       // Fire-and-forget: feedback log + memory extraction
       insertFeedbackLog({
@@ -761,8 +734,23 @@ export default function App() {
         )
       );
 
-      loadConversations();
+      patchConversation(convoId, {
+        last_message_preview: previewFor(fullResponse),
+        updated_at: assistantRow.created_at,
+      });
+      turn.finish({
+        outcome: 'ok',
+        requestId: assistantMeta?.requestId,
+        model: selectedModel,
+        stream: assistantMeta?.timings,
+      });
     } catch (err) {
+      turn.finish({
+        outcome: err.name === 'AbortError' ? 'aborted' : 'error',
+        requestId: err.requestId,
+        model: selectedModel,
+        stream: err.timings,
+      });
       if (err.name === 'AbortError') return;
 
       setMessages(prev => {
@@ -783,6 +771,7 @@ export default function App() {
       });
     } finally {
       setIsTyping(false);
+      setStreamStatus(null);
       abortRef.current = null;
     }
   };
@@ -804,6 +793,7 @@ export default function App() {
       }
     }
     if (!userMsg) return;
+    const turn = startTurn('regenerate');
 
     if (
       botMsg.id &&
@@ -819,6 +809,7 @@ export default function App() {
 
     setMessages(prev => prev.filter(m => m.id !== botMsg.id));
     setIsTyping(true);
+    setStreamStatus('received');
 
     const context = messages
       .slice(0, botIdx)
@@ -830,6 +821,7 @@ export default function App() {
 
     const tempId = `temp-${Date.now()}`;
     setMessages(prev => [...prev, { id: tempId, text: '', sender: 'bot' }]);
+    turn.mark('ack');
 
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
@@ -841,6 +833,7 @@ export default function App() {
         resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => null),
         retrieveMemoryContext(currentConversationId).catch(() => ''),
       ]);
+      turn.mark('context_ready');
       let fullResponse = '';
       const assistantMeta = await sendMessage({
         messages: context,
@@ -848,6 +841,7 @@ export default function App() {
         signal: controller.signal,
         behavior: manualBehavior,
         memoryPrompt,
+        onStatus: setStreamStatus,
         onChunk: (chunk) => {
           fullResponse += chunk;
           setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m));
@@ -879,11 +873,27 @@ export default function App() {
         modelUsed:        selectedModel,
       }).catch(() => {});
 
+      turn.mark('assistant_saved');
       processMemoryExtraction(currentConversationId, assistantRow.id, userMsg.text, fullResponse).catch(() => {});
 
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m));
-      loadConversations();
+      patchConversation(currentConversationId, {
+        last_message_preview: previewFor(fullResponse),
+        updated_at: assistantRow.created_at,
+      });
+      turn.finish({
+        outcome: 'ok',
+        requestId: assistantMeta?.requestId,
+        model: selectedModel,
+        stream: assistantMeta?.timings,
+      });
     } catch (err) {
+      turn.finish({
+        outcome: err.name === 'AbortError' ? 'aborted' : 'error',
+        requestId: err.requestId,
+        model: selectedModel,
+        stream: err.timings,
+      });
       if (err.name === 'AbortError') return;
       setMessages(prev =>
         prev.map(m =>
@@ -892,6 +902,7 @@ export default function App() {
       );
     } finally {
       setIsTyping(false);
+      setStreamStatus(null);
       abortRef.current = null;
     }
   };
@@ -902,34 +913,51 @@ export default function App() {
     const msgIdx = messages.findIndex(m => m.id === msgId);
     if (msgIdx === -1) return;
     const originalMsg = messages[msgIdx];
+    const turn = startTurn('edit');
 
-    if (originalMsg.created_at) {
-      try {
-        await deleteMessagesAfter(currentConversationId, originalMsg.created_at);
-      } catch {
-        // best-effort cleanup; local state is the source of truth here
-      }
-    }
-
+    // Show the edited message at once, as send does; the database catches up.
     const preceding = messages.slice(0, msgIdx);
-    setMessages(preceding);
+    const tempUserId = `temp-user-${Date.now()}`;
+    const userMsg = {
+      id: tempUserId,
+      text: newText,
+      sender: 'user',
+      created_at: new Date().toISOString(),
+    };
+    setMessages([...preceding, userMsg]);
+    turn.mark('ack');
     setIsTyping(true);
+    setStreamStatus('received');
 
     try {
-      const userRow = await insertMessage({
+      // The old message and everything after it must be gone before the edited
+      // one is inserted: the delete matches created_at >= the original's.
+      if (originalMsg.created_at) {
+        try {
+          await deleteMessagesAfter(currentConversationId, originalMsg.created_at);
+        } catch {
+          // best-effort cleanup; local state is the source of truth here
+        }
+      }
+
+      // As in handleSend: saved alongside the chat request, awaited before the
+      // assistant's row.
+      const userSave = insertMessage({
         conversationId: currentConversationId,
         role: 'user',
         content: newText,
+      }).then(userRow => {
+        turn.mark('user_saved');
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === tempUserId
+              ? { ...m, id: userRow.id, created_at: userRow.created_at }
+              : m
+          )
+        );
+        return userRow;
       });
-
-      const userMsg = {
-        id: userRow.id,
-        text: newText,
-        sender: 'user',
-        created_at: userRow.created_at,
-      };
-
-      setMessages(prev => [...prev, userMsg]);
+      userSave.catch(() => {});
 
       const context = [...preceding, userMsg].slice(-20).map(m => ({
         role: m.sender === 'user' ? 'user' : 'assistant',
@@ -948,6 +976,7 @@ export default function App() {
         resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => null),
         retrieveMemoryContext(currentConversationId).catch(() => ''),
       ]);
+      turn.mark('context_ready');
       let fullResponse = '';
       const assistantMeta = await sendMessage({
         messages: context,
@@ -955,6 +984,7 @@ export default function App() {
         signal: controller.signal,
         behavior: manualBehavior,
         memoryPrompt,
+        onStatus: setStreamStatus,
         onChunk: (chunk) => {
           fullResponse += chunk;
           setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m));
@@ -969,6 +999,8 @@ export default function App() {
       setRightPanelLinks(sources);
       setRightPanelContent(sources.length > 0 ? 'links' : 'empty');
 
+      // After the user's row, so created_at keeps the thread in order.
+      await userSave;
       const assistantRow = await insertMessage({
         conversationId: currentConversationId,
         role: 'assistant',
@@ -986,11 +1018,27 @@ export default function App() {
         modelUsed:        selectedModel,
       }).catch(() => {});
 
+      turn.mark('assistant_saved');
       processMemoryExtraction(currentConversationId, assistantRow.id, newText, fullResponse).catch(() => {});
 
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m));
-      loadConversations();
+      patchConversation(currentConversationId, {
+        last_message_preview: previewFor(fullResponse),
+        updated_at: assistantRow.created_at,
+      });
+      turn.finish({
+        outcome: 'ok',
+        requestId: assistantMeta?.requestId,
+        model: selectedModel,
+        stream: assistantMeta?.timings,
+      });
     } catch (err) {
+      turn.finish({
+        outcome: err.name === 'AbortError' ? 'aborted' : 'error',
+        requestId: err.requestId,
+        model: selectedModel,
+        stream: err.timings,
+      });
       if (err.name === 'AbortError') return;
       setMessages(prev => {
         const last = prev[prev.length - 1];
@@ -1010,6 +1058,7 @@ export default function App() {
       });
     } finally {
       setIsTyping(false);
+      setStreamStatus(null);
       abortRef.current = null;
     }
   };
@@ -1178,6 +1227,7 @@ export default function App() {
             setInput={setInput}
             handleSend={handleSend}
             isTyping={isTyping}
+            streamStatus={streamStatus}
             messagesEndRef={messagesEndRef}
             selectedModel={selectedModel}
             setSelectedModel={setSelectedModel}

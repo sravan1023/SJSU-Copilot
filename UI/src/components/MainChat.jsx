@@ -132,6 +132,17 @@ function MarkdownContent({ text }) {
 }
 
 
+// Progress keys emitted by the backend before the first answer token.
+// Kept here rather than in App so the wording lives with the presentation —
+// audience-specific copy will replace these.
+const STATUS_LABELS = {
+  received: 'Thinking',
+  searching: 'Searching university sources',
+  generating: 'Writing answer',
+};
+
+const statusLabelFor = (key) => STATUS_LABELS[key] || 'Thinking';
+
 // ── Main component ───────────────────────────────────────────
 export default function MainChat({
   messages,
@@ -139,6 +150,7 @@ export default function MainChat({
   setInput,
   handleSend,
   isTyping,
+  streamStatus,
   messagesEndRef,
   selectedModel,
   setSelectedModel,
@@ -262,8 +274,8 @@ export default function MainChat({
             onChange={(e) => setSelectedModel(e.target.value)}
             className="bg-bg-surface border border-border-color text-text-primary text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-sjsu-gold/30 cursor-pointer transition-colors"
           >
-            <option value="8b">Fast</option>
-            <option value="70b">Thinking</option>
+            <option value="fast">Fast</option>
+            <option value="quality">Thinking</option>
           </select>
         </div>
       </header>
@@ -285,7 +297,7 @@ export default function MainChat({
               <SuggestionCard title="Degree Requirements" subtitle="What classes do I need to graduate?" onClick={() => handleSuggestionClick('What classes do I need to graduate?')} />
               <SuggestionCard title="Registration Dates" subtitle="When is the deadline for Spring 2026?" onClick={() => handleSuggestionClick('When is the deadline for Spring 2026?')} />
               <SuggestionCard title="Professor Office Hours" subtitle="Where can I find my professors?" onClick={() => handleSuggestionClick('Where can I find my professors?')} />
-              <SuggestionCard title="Campus Dining" subtitle="What are the best places to eat near the SU?" onClick={() => handleSuggestionClick('nearby restaurants')} />
+              <SuggestionCard title="Campus Dining" subtitle="What are the best places to eat near the SU?" onClick={() => handleSuggestionClick('What are the best places to eat near the SU?')} />
               <SuggestionCard title="Internship Opportunities" subtitle="Show me roles for Software Engineering" onClick={() => handleSuggestionClick('Show me roles for Software Engineering')} />
               <SuggestionCard title="Library Resources" subtitle="How do I book a private study room?" onClick={() => handleSuggestionClick('How do I book a private study room?')} />
             </div>
@@ -384,8 +396,22 @@ export default function MainChat({
                     {/* Markdown-rendered content */}
                     <div className="prose max-w-none text-text-primary leading-7 text-sm markdown-body">
                       <MarkdownContent text={msg.text} />
+                      {/* Before the first token arrives, say what the backend is
+                          doing rather than showing a bare blinking cursor. */}
+                      {isStreaming(msg) && !msg.text && (
+                        <span className="inline-flex items-center space-x-2 text-text-secondary select-none">
+                          <span className="text-sm font-medium animate-pulse italic">
+                            {statusLabelFor(streamStatus)}
+                          </span>
+                          <span className="flex space-x-1">
+                            <span className="w-1.5 h-1.5 bg-[#E5A823] rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                            <span className="w-1.5 h-1.5 bg-[#E5A823] rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                            <span className="w-1.5 h-1.5 bg-[#E5A823] rounded-full animate-bounce"></span>
+                          </span>
+                        </span>
+                      )}
                       {/* Streaming cursor */}
-                      {isStreaming(msg) && (
+                      {isStreaming(msg) && msg.text && (
                         <span className="inline-block w-2 h-4 bg-sjsu-gold/80 rounded-sm animate-pulse ml-0.5 align-middle" />
                       )}
                     </div>
@@ -475,7 +501,7 @@ export default function MainChat({
             {isTyping && !messages.some(m => isStreaming(m)) && (
               <div className="flex flex-col mb-4 items-start animate-fade-in">
                 <div className="flex items-center space-x-2 h-7 px-3 text-text-secondary select-none">
-                  <span className="text-sm font-medium animate-pulse italic">Thinking</span>
+                  <span className="text-sm font-medium animate-pulse italic">{statusLabelFor(streamStatus)}</span>
                   <div className="flex space-x-1 mt-1">
                     <div className="w-1.5 h-1.5 bg-[#E5A823] rounded-full animate-bounce [animation-delay:-0.3s]"></div>
                     <div className="w-1.5 h-1.5 bg-[#E5A823] rounded-full animate-bounce [animation-delay:-0.15s]"></div>

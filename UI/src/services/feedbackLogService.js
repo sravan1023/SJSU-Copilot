@@ -12,7 +12,9 @@ import { supabase } from '../supabaseClient.js';
  * @param {string[]} opts.validatorsRun  - rule names that were evaluated
  * @param {boolean} opts.validatorsPassed - true if no violations triggered
  * @param {string[]} opts.repairsApplied - rule names whose repairs were applied
- * @param {string|null} opts.modelUsed   - model key ('8b' | '70b')
+ * @param {string|null} opts.modelUsed   - model key ('fast' | 'quality').
+ *                                          Rows written before 2026-09-16 use
+ *                                          the legacy '8b' | '70b' keys.
  */
 export async function insertFeedbackLog({
   responseId,

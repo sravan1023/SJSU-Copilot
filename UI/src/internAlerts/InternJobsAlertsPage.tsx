@@ -123,7 +123,10 @@ export default function InternJobsAlertsPage({ onBack }: InternJobsAlertsPagePro
             <select
               id="category-select"
               value={selectedCategory ?? ''}
-              onChange={(e) => setSelectedCategory(e.target.value || null)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setSelectedCategory(CATEGORY_OPTIONS.find((option) => option === value) ?? null);
+              }}
               className="rounded-md border border-border-color bg-bg-surface px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-bg-hover focus:outline-none focus:ring-1 focus:ring-sjsu-gold"
             >
               <option value="">All Categories</option>

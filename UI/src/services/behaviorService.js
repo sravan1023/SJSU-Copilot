@@ -91,10 +91,31 @@ export async function fetchBehaviorSettings(userId) {
  * @returns {Promise<Object>} object containing only non-null override fields
  */
 export async function resolveEffectiveBehavior(userId, projectId, conversationId) {
-  const { data, error } = await supabase
+  // Only the three scopes that can apply. This previously selected every
+  // behaviour row the user owned and filtered client-side, so the work grew
+  // with each project and conversation they had ever customised — on the
+  // critical path of every message.
+  const scopes = ['and(project_id.is.null,conversation_id.is.null)'];
+  if (projectId) scopes.push(`and(project_id.eq.${projectId},conversation_id.is.null)`);
+  if (conversationId) scopes.push(`conversation_id.eq.${conversationId}`);
+
+  let { data, error } = await supabase
     .from('behavior_settings')
     .select(COLUMNS)
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .or(scopes.join(','));
+
+  if (error) {
+    // Fall back to the unfiltered query rather than silently losing the user's
+    // settings. Losing them would not surface as an error anywhere — the caller
+    // treats a rejection as "no overrides" — so this degrades to slower rather
+    // than to wrong.
+    console.warn('Scoped behavior query failed, falling back to full fetch:', error.message);
+    ({ data, error } = await supabase
+      .from('behavior_settings')
+      .select(COLUMNS)
+      .eq('user_id', userId));
+  }
 
   if (error) throw error;
 

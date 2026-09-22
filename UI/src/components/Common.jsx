@@ -10,14 +10,6 @@ export function SuggestionCard({ title, subtitle, onClick }) {
     );
 }
 
-export function FollowUpChip({ text }) {
-    return (
-        <button className="bg-transparent hover:bg-bg-hover text-text-primary border border-border-color px-4 py-2 rounded-full text-xs font-medium transition-colors">
-            {text}
-        </button>
-    );
-}
-
 export function LinkItem({ label, href, isFirst = false }) {
     const Wrapper = href ? 'a' : 'div';
     return (
