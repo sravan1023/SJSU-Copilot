@@ -19,18 +19,21 @@ CREATE TABLE IF NOT EXISTS behavior_feedback_log (
 ALTER TABLE behavior_feedback_log ENABLE ROW LEVEL SECURITY;
 
 -- Users may only insert rows where user_id matches their own auth.uid()
+DROP POLICY IF EXISTS "Users can insert own feedback logs" ON behavior_feedback_log;
 CREATE POLICY "Users can insert own feedback logs"
   ON behavior_feedback_log
   FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
 -- Users may only read their own rows
+DROP POLICY IF EXISTS "Users can read own feedback logs" ON behavior_feedback_log;
 CREATE POLICY "Users can read own feedback logs"
   ON behavior_feedback_log
   FOR SELECT
   USING (auth.uid() = user_id);
 
 -- Users may only update their own rows (used to set user_feedback)
+DROP POLICY IF EXISTS "Users can update own feedback logs" ON behavior_feedback_log;
 CREATE POLICY "Users can update own feedback logs"
   ON behavior_feedback_log
   FOR UPDATE

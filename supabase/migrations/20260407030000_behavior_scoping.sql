@@ -13,6 +13,9 @@ alter table behavior_settings
   drop constraint if exists uq_behavior_settings_user;
 
 alter table behavior_settings
+  drop constraint if exists uq_behavior_settings_scope;
+
+alter table behavior_settings
   add constraint uq_behavior_settings_scope
   unique (user_id, project_id, conversation_id);
 

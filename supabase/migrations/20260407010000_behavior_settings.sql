@@ -27,14 +27,17 @@ on behavior_settings(user_id);
 -- RLS: users can only access their own behavior settings
 alter table behavior_settings enable row level security;
 
+drop policy if exists "Users can read own behavior settings" on behavior_settings;
 create policy "Users can read own behavior settings"
   on behavior_settings for select
   using (auth.uid() = user_id);
 
+drop policy if exists "Users can insert own behavior settings" on behavior_settings;
 create policy "Users can insert own behavior settings"
   on behavior_settings for insert
   with check (auth.uid() = user_id);
 
+drop policy if exists "Users can update own behavior settings" on behavior_settings;
 create policy "Users can update own behavior settings"
   on behavior_settings for update
   using (auth.uid() = user_id);
@@ -50,6 +53,7 @@ begin
 end;
 $$ language plpgsql security definer;
 
+drop trigger if exists trg_create_default_behavior_settings on profiles;
 create trigger trg_create_default_behavior_settings
   after insert on profiles
   for each row
