@@ -56,9 +56,20 @@ venv/
 # Misc
 coverage/
 .cache/
-docs/BEHAVIOR_SYSTEM.md
+# Local working docs: report chapters, the original proposal, design notes,
+# the build plan and its implementation log
+docs/
+BUILD_PLAN.md
+NOTES.md
 design_spec_template.md
 PROJECT_STATUS.md
 TODO.md
 
 
+
+
+# Supabase CLI cache (machine-specific, rewritten on every CLI run)
+supabase/.temp/
+
+# Raw benchmark output (the summaries in backend/bench/ are kept)
+backend/bench/results/
