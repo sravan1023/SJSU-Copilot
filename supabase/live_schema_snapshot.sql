@@ -23,6 +23,19 @@ COMMENT ON SCHEMA "public" IS 'standard public schema';
 
 
 
+CREATE TYPE "public"."affiliation_kind" AS ENUM (
+    'student',
+    'alumni',
+    'faculty',
+    'staff',
+    'applicant',
+    'community'
+);
+
+
+ALTER TYPE "public"."affiliation_kind" OWNER TO "postgres";
+
+
 CREATE TYPE "public"."memory_category" AS ENUM (
     'preference',
     'decision',
@@ -56,6 +69,18 @@ CREATE TYPE "public"."memory_status" AS ENUM (
 ALTER TYPE "public"."memory_status" OWNER TO "postgres";
 
 
+CREATE TYPE "public"."verification_status" AS ENUM (
+    'declared',
+    'pending',
+    'verified',
+    'expired',
+    'revoked'
+);
+
+
+ALTER TYPE "public"."verification_status" OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."archive_stale_memories"("p_conversation_age_days" integer DEFAULT 90, "p_min_importance" integer DEFAULT 3) RETURNS integer
     LANGUAGE "plpgsql"
     AS $$
@@ -80,11 +105,18 @@ ALTER FUNCTION "public"."archive_stale_memories"("p_conversation_age_days" integ
 
 CREATE OR REPLACE FUNCTION "public"."create_default_behavior_settings"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
     AS $$
 begin
-  insert into behavior_settings (user_id)
-  values (new.id)
-  on conflict (user_id) do nothing;
+  if not exists (
+    select 1
+      from public.behavior_settings
+     where user_id = new.id
+       and project_id is null
+       and conversation_id is null
+  ) then
+    insert into public.behavior_settings (user_id) values (new.id);
+  end if;
   return new;
 end;
 $$;
@@ -106,6 +138,27 @@ $$;
 
 
 ALTER FUNCTION "public"."enforce_sjsu_email"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."freeze_profile_privilege_columns"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  -- coalesce, not a bare `auth.role() <> 'service_role'`: on a direct psql or
+  -- migration connection auth.role() is null, that comparison evaluates to
+  -- NULL, the branch is skipped, and the trigger would silently do nothing.
+  if coalesce(auth.role(), current_user) not in
+       ('service_role', 'supabase_admin', 'postgres') then
+    new.role := old.role;
+    new.email := old.email;
+  end if;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."freeze_profile_privilege_columns"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."generate_job_dedupe_hash"("input_title" "text", "input_company" "text") RETURNS "text"
@@ -189,6 +242,23 @@ $$;
 
 
 ALTER FUNCTION "public"."handle_updated_at"() OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."has_grant"("p_capability" "text") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  select exists (
+    select 1
+      from public.admin_grants g
+     where g.user_id = auth.uid()
+       and g.capability = p_capability
+       and (g.expires_at is null or g.expires_at > now())
+  );
+$$;
+
+
+ALTER FUNCTION "public"."has_grant"("p_capability" "text") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."match_documents"("query_embedding" "public"."vector", "match_count" integer DEFAULT 5, "match_threshold" double precision DEFAULT 0.78) RETURNS TABLE("id" "uuid", "document_id" "uuid", "chunk_index" integer, "content" "text", "metadata" "jsonb", "title" "text", "url" "text", "source" "text", "document_type" "text", "similarity" double precision, "last_verified_at" timestamp with time zone)
@@ -302,6 +372,26 @@ $$;
 ALTER FUNCTION "public"."search_documents_fts"("query_text" "text", "match_count" integer) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."set_conversation_preview"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+begin
+  update public.conversations
+     set last_message_preview = case
+           when length(new.content) > 80 then left(new.content, 80) || '...'
+           else new.content
+         end,
+         updated_at = now()
+   where id = new.conversation_id;
+  return new;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."set_conversation_preview"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."set_updated_at"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     AS $$
@@ -353,6 +443,19 @@ ALTER FUNCTION "public"."update_pipeline_marker_if_expected"("p_pipeline_key" "t
 SET default_tablespace = '';
 
 SET default_table_access_method = "heap";
+
+
+CREATE TABLE IF NOT EXISTS "public"."admin_grants" (
+    "user_id" "uuid" NOT NULL,
+    "capability" "text" NOT NULL,
+    "granted_by" "uuid",
+    "granted_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "expires_at" timestamp with time zone,
+    CONSTRAINT "admin_grants_capability_check" CHECK (("capability" ~ '^[a-z][a-z0-9_]{1,63}$'::"text"))
+);
+
+
+ALTER TABLE "public"."admin_grants" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."ats_registry" (
@@ -433,7 +536,9 @@ CREATE TABLE IF NOT EXISTS "public"."conversations" (
     "last_message_preview" "text",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "project_id" "uuid"
+    "project_id" "uuid",
+    "audience" "text",
+    CONSTRAINT "conversations_audience_check" CHECK ((("audience" IS NULL) OR ("audience" = ANY (ARRAY['student'::"text", 'alumni'::"text", 'guest'::"text", 'faculty'::"text"]))))
 );
 
 
@@ -636,6 +741,19 @@ CREATE TABLE IF NOT EXISTS "public"."pipeline_state" (
 ALTER TABLE "public"."pipeline_state" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."profile_audience_details" (
+    "user_id" "uuid" NOT NULL,
+    "audience" "text" NOT NULL,
+    "details" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "profile_audience_details_audience_check" CHECK (("audience" = ANY (ARRAY['student'::"text", 'alumni'::"text", 'guest'::"text", 'faculty'::"text"]))),
+    CONSTRAINT "profile_audience_details_size_check" CHECK (("length"(("details")::"text") <= 8192))
+);
+
+
+ALTER TABLE "public"."profile_audience_details" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "id" "uuid" NOT NULL,
     "email" "text" NOT NULL,
@@ -651,6 +769,9 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "class_standing" "text",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "active_audience" "text" DEFAULT 'student'::"text" NOT NULL,
+    "onboarded_at" timestamp with time zone,
+    CONSTRAINT "profiles_active_audience_check" CHECK (("active_audience" = ANY (ARRAY['student'::"text", 'alumni'::"text", 'guest'::"text", 'faculty'::"text"]))),
     CONSTRAINT "profiles_class_standing_check" CHECK (("class_standing" = ANY (ARRAY['Freshman'::"text", 'Sophomore'::"text", 'Junior'::"text", 'Senior'::"text", 'Graduate'::"text"]))),
     CONSTRAINT "profiles_gpa_check" CHECK ((("gpa" >= (0)::numeric) AND ("gpa" <= (4)::numeric))),
     CONSTRAINT "profiles_role_check" CHECK (("role" = ANY (ARRAY['student'::"text", 'advisor'::"text", 'admin'::"text"])))
@@ -732,6 +853,21 @@ CREATE TABLE IF NOT EXISTS "public"."uploaded_documents" (
 ALTER TABLE "public"."uploaded_documents" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."user_affiliations" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "affiliation" "public"."affiliation_kind" NOT NULL,
+    "status" "public"."verification_status" DEFAULT 'declared'::"public"."verification_status" NOT NULL,
+    "source" "text",
+    "verified_at" timestamp with time zone,
+    "expires_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."user_affiliations" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."user_job_applications" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "user_id" "uuid" NOT NULL,
@@ -758,6 +894,11 @@ CREATE TABLE IF NOT EXISTS "public"."user_saved_jobs" (
 
 
 ALTER TABLE "public"."user_saved_jobs" OWNER TO "postgres";
+
+
+ALTER TABLE ONLY "public"."admin_grants"
+    ADD CONSTRAINT "admin_grants_pkey" PRIMARY KEY ("user_id", "capability");
+
 
 
 ALTER TABLE ONLY "public"."ats_registry"
@@ -855,6 +996,11 @@ ALTER TABLE ONLY "public"."pipeline_state"
 
 
 
+ALTER TABLE ONLY "public"."profile_audience_details"
+    ADD CONSTRAINT "profile_audience_details_pkey" PRIMARY KEY ("user_id", "audience");
+
+
+
 ALTER TABLE ONLY "public"."profiles"
     ADD CONSTRAINT "profiles_pkey" PRIMARY KEY ("id");
 
@@ -890,8 +1036,13 @@ ALTER TABLE ONLY "public"."uploaded_documents"
 
 
 
-ALTER TABLE ONLY "public"."behavior_settings"
-    ADD CONSTRAINT "uq_behavior_settings_scope" UNIQUE ("user_id", "project_id", "conversation_id");
+ALTER TABLE ONLY "public"."user_affiliations"
+    ADD CONSTRAINT "uq_user_affiliations_user_affiliation" UNIQUE ("user_id", "affiliation");
+
+
+
+ALTER TABLE ONLY "public"."user_affiliations"
+    ADD CONSTRAINT "user_affiliations_pkey" PRIMARY KEY ("id");
 
 
 
@@ -1019,6 +1170,14 @@ CREATE INDEX "idx_projects_user" ON "public"."projects" USING "btree" ("user_id"
 
 
 
+CREATE INDEX "idx_user_affiliations_user" ON "public"."user_affiliations" USING "btree" ("user_id");
+
+
+
+CREATE UNIQUE INDEX "uq_behavior_settings_scope_idx" ON "public"."behavior_settings" USING "btree" ("user_id", COALESCE("project_id", '00000000-0000-0000-0000-000000000000'::"uuid"), COALESCE("conversation_id", '00000000-0000-0000-0000-000000000000'::"uuid"));
+
+
+
 CREATE OR REPLACE TRIGGER "on_academic_records_updated" BEFORE UPDATE ON "public"."student_academic_records" FOR EACH ROW EXECUTE FUNCTION "public"."handle_updated_at"();
 
 
@@ -1028,6 +1187,10 @@ CREATE OR REPLACE TRIGGER "on_conversations_updated" BEFORE UPDATE ON "public"."
 
 
 CREATE OR REPLACE TRIGGER "on_job_sources_updated" BEFORE UPDATE ON "public"."job_sources" FOR EACH ROW EXECUTE FUNCTION "public"."handle_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "on_profile_audience_details_updated" BEFORE UPDATE ON "public"."profile_audience_details" FOR EACH ROW EXECUTE FUNCTION "public"."handle_updated_at"();
 
 
 
@@ -1047,6 +1210,10 @@ CREATE OR REPLACE TRIGGER "trg_create_default_behavior_settings" AFTER INSERT ON
 
 
 
+CREATE OR REPLACE TRIGGER "trg_freeze_profile_privilege_columns" BEFORE UPDATE ON "public"."profiles" FOR EACH ROW EXECUTE FUNCTION "public"."freeze_profile_privilege_columns"();
+
+
+
 CREATE OR REPLACE TRIGGER "trg_memories_updated_at" BEFORE UPDATE ON "public"."memories" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
 
 
@@ -1060,6 +1227,20 @@ CREATE OR REPLACE TRIGGER "trg_project_summaries_updated_at" BEFORE UPDATE ON "p
 
 
 CREATE OR REPLACE TRIGGER "trg_projects_updated_at" BEFORE UPDATE ON "public"."projects" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "trg_set_conversation_preview" AFTER INSERT ON "public"."messages" FOR EACH ROW EXECUTE FUNCTION "public"."set_conversation_preview"();
+
+
+
+ALTER TABLE ONLY "public"."admin_grants"
+    ADD CONSTRAINT "admin_grants_granted_by_fkey" FOREIGN KEY ("granted_by") REFERENCES "auth"."users"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."admin_grants"
+    ADD CONSTRAINT "admin_grants_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
 
 
 
@@ -1163,6 +1344,11 @@ ALTER TABLE ONLY "public"."pipeline_state"
 
 
 
+ALTER TABLE ONLY "public"."profile_audience_details"
+    ADD CONSTRAINT "profile_audience_details_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."profiles"
     ADD CONSTRAINT "profiles_id_fkey" FOREIGN KEY ("id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
 
@@ -1193,6 +1379,11 @@ ALTER TABLE ONLY "public"."uploaded_documents"
 
 
 
+ALTER TABLE ONLY "public"."user_affiliations"
+    ADD CONSTRAINT "user_affiliations_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."user_job_applications"
     ADD CONSTRAINT "user_job_applications_job_id_fkey" FOREIGN KEY ("job_id") REFERENCES "public"."job_listings"("id") ON DELETE CASCADE;
 
@@ -1210,18 +1401,6 @@ ALTER TABLE ONLY "public"."user_saved_jobs"
 
 ALTER TABLE ONLY "public"."user_saved_jobs"
     ADD CONSTRAINT "user_saved_jobs_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."profiles"("id") ON DELETE CASCADE;
-
-
-
-CREATE POLICY "Authenticated users can insert fetch logs" ON "public"."job_fetch_runs" FOR INSERT WITH CHECK (("auth"."role"() = 'authenticated'::"text"));
-
-
-
-CREATE POLICY "Authenticated users can insert jobs" ON "public"."job_listings" FOR INSERT WITH CHECK (("auth"."role"() = 'authenticated'::"text"));
-
-
-
-CREATE POLICY "Authenticated users can manage job sources" ON "public"."job_sources" USING (("auth"."role"() = 'authenticated'::"text")) WITH CHECK (("auth"."role"() = 'authenticated'::"text"));
 
 
 
@@ -1301,7 +1480,7 @@ CREATE POLICY "Users can read own saved jobs" ON "public"."user_saved_jobs" FOR 
 
 
 
-CREATE POLICY "Users can update own academic records" ON "public"."student_academic_records" FOR UPDATE USING (("auth"."uid"() = "user_id"));
+CREATE POLICY "Users can update own academic records" ON "public"."student_academic_records" FOR UPDATE USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));
 
 
 
@@ -1309,7 +1488,7 @@ CREATE POLICY "Users can update own behavior settings" ON "public"."behavior_set
 
 
 
-CREATE POLICY "Users can update own conversations" ON "public"."saved_conversations" FOR UPDATE USING (("auth"."uid"() = "user_id"));
+CREATE POLICY "Users can update own conversations" ON "public"."saved_conversations" FOR UPDATE USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));
 
 
 
@@ -1334,6 +1513,20 @@ CREATE POLICY "Users can view own profile" ON "public"."profiles" FOR SELECT USI
 
 
 CREATE POLICY "Users can view own uploads" ON "public"."uploaded_documents" FOR SELECT USING (("auth"."uid"() = "owner_id"));
+
+
+
+ALTER TABLE "public"."admin_grants" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "admin_grants_select_own" ON "public"."admin_grants" FOR SELECT TO "authenticated" USING (("user_id" = "auth"."uid"()));
+
+
+
+ALTER TABLE "public"."ats_registry" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "ats_registry_select_authenticated" ON "public"."ats_registry" FOR SELECT TO "authenticated" USING (true);
 
 
 
@@ -1403,6 +1596,25 @@ CREATE POLICY "pipeline_state_service_write" ON "public"."pipeline_state" TO "se
 
 
 
+ALTER TABLE "public"."profile_audience_details" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "profile_audience_details_delete_own" ON "public"."profile_audience_details" FOR DELETE TO "authenticated" USING (("user_id" = "auth"."uid"()));
+
+
+
+CREATE POLICY "profile_audience_details_insert_own" ON "public"."profile_audience_details" FOR INSERT TO "authenticated" WITH CHECK (("user_id" = "auth"."uid"()));
+
+
+
+CREATE POLICY "profile_audience_details_select_own" ON "public"."profile_audience_details" FOR SELECT TO "authenticated" USING (("user_id" = "auth"."uid"()));
+
+
+
+CREATE POLICY "profile_audience_details_update_own" ON "public"."profile_audience_details" FOR UPDATE TO "authenticated" USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
+
+
+
 ALTER TABLE "public"."profiles" ENABLE ROW LEVEL SECURITY;
 
 
@@ -1419,6 +1631,25 @@ ALTER TABLE "public"."student_academic_records" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."uploaded_documents" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."user_affiliations" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "user_affiliations_delete_own_declared" ON "public"."user_affiliations" FOR DELETE TO "authenticated" USING ((("user_id" = "auth"."uid"()) AND ("status" = 'declared'::"public"."verification_status")));
+
+
+
+CREATE POLICY "user_affiliations_insert_own_declared" ON "public"."user_affiliations" FOR INSERT TO "authenticated" WITH CHECK ((("user_id" = "auth"."uid"()) AND ("status" = 'declared'::"public"."verification_status")));
+
+
+
+CREATE POLICY "user_affiliations_select_own" ON "public"."user_affiliations" FOR SELECT TO "authenticated" USING (("user_id" = "auth"."uid"()));
+
+
+
+CREATE POLICY "user_affiliations_update_own_declared" ON "public"."user_affiliations" FOR UPDATE TO "authenticated" USING ((("user_id" = "auth"."uid"()) AND ("status" = 'declared'::"public"."verification_status"))) WITH CHECK ((("user_id" = "auth"."uid"()) AND ("status" = 'declared'::"public"."verification_status")));
+
 
 
 ALTER TABLE "public"."user_job_applications" ENABLE ROW LEVEL SECURITY;
@@ -1475,11 +1706,11 @@ CREATE POLICY "users can manage own projects" ON "public"."projects" USING (("us
 
 
 
-CREATE POLICY "users can update own conversations" ON "public"."conversations" FOR UPDATE USING (("user_id" = "auth"."uid"()));
+CREATE POLICY "users can update own conversations" ON "public"."conversations" FOR UPDATE USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
 
 
 
-CREATE POLICY "users can update own memories" ON "public"."memories" FOR UPDATE USING (("user_id" = "auth"."uid"()));
+CREATE POLICY "users can update own memories" ON "public"."memories" FOR UPDATE USING (("user_id" = "auth"."uid"())) WITH CHECK (("user_id" = "auth"."uid"()));
 
 
 
@@ -1522,6 +1753,12 @@ GRANT ALL ON FUNCTION "public"."enforce_sjsu_email"() TO "service_role";
 
 
 
+GRANT ALL ON FUNCTION "public"."freeze_profile_privilege_columns"() TO "anon";
+GRANT ALL ON FUNCTION "public"."freeze_profile_privilege_columns"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."freeze_profile_privilege_columns"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."generate_job_dedupe_hash"("input_title" "text", "input_company" "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."generate_job_dedupe_hash"("input_title" "text", "input_company" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."generate_job_dedupe_hash"("input_title" "text", "input_company" "text") TO "service_role";
@@ -1543,6 +1780,12 @@ GRANT ALL ON FUNCTION "public"."handle_new_user"() TO "service_role";
 GRANT ALL ON FUNCTION "public"."handle_updated_at"() TO "anon";
 GRANT ALL ON FUNCTION "public"."handle_updated_at"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."handle_updated_at"() TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."has_grant"("p_capability" "text") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."has_grant"("p_capability" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."has_grant"("p_capability" "text") TO "service_role";
 
 
 
@@ -1570,21 +1813,30 @@ GRANT ALL ON FUNCTION "public"."search_documents_fts"("query_text" "text", "matc
 
 
 
+GRANT ALL ON FUNCTION "public"."set_conversation_preview"() TO "anon";
+GRANT ALL ON FUNCTION "public"."set_conversation_preview"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."set_conversation_preview"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "anon";
 GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."update_pipeline_marker_if_expected"("p_pipeline_key" "text", "p_expected_previous_top_url" "text", "p_new_previous_top_url" "text", "p_last_run_id" "uuid") TO "anon";
-GRANT ALL ON FUNCTION "public"."update_pipeline_marker_if_expected"("p_pipeline_key" "text", "p_expected_previous_top_url" "text", "p_new_previous_top_url" "text", "p_last_run_id" "uuid") TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."update_pipeline_marker_if_expected"("p_pipeline_key" "text", "p_expected_previous_top_url" "text", "p_new_previous_top_url" "text", "p_last_run_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."update_pipeline_marker_if_expected"("p_pipeline_key" "text", "p_expected_previous_top_url" "text", "p_new_previous_top_url" "text", "p_last_run_id" "uuid") TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."ats_registry" TO "anon";
-GRANT ALL ON TABLE "public"."ats_registry" TO "authenticated";
+GRANT ALL ON TABLE "public"."admin_grants" TO "service_role";
+GRANT SELECT ON TABLE "public"."admin_grants" TO "authenticated";
+
+
+
 GRANT ALL ON TABLE "public"."ats_registry" TO "service_role";
+GRANT SELECT ON TABLE "public"."ats_registry" TO "authenticated";
 
 
 
@@ -1678,9 +1930,62 @@ GRANT ALL ON TABLE "public"."pipeline_state" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."profiles" TO "anon";
-GRANT ALL ON TABLE "public"."profiles" TO "authenticated";
+GRANT ALL ON TABLE "public"."profile_audience_details" TO "service_role";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."profile_audience_details" TO "authenticated";
+
+
+
+GRANT SELECT,REFERENCES,TRIGGER,TRUNCATE,MAINTAIN ON TABLE "public"."profiles" TO "anon";
+GRANT SELECT,REFERENCES,TRIGGER,TRUNCATE,MAINTAIN ON TABLE "public"."profiles" TO "authenticated";
 GRANT ALL ON TABLE "public"."profiles" TO "service_role";
+
+
+
+GRANT INSERT("id") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT INSERT("email") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT INSERT("full_name"),UPDATE("full_name") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("university_id") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("major") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("minor") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("graduation_year") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("phone") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("gpa") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("class_standing") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("active_audience") ON TABLE "public"."profiles" TO "authenticated";
+
+
+
+GRANT UPDATE("onboarded_at") ON TABLE "public"."profiles" TO "authenticated";
 
 
 
@@ -1711,6 +2016,23 @@ GRANT ALL ON TABLE "public"."student_academic_records" TO "service_role";
 GRANT ALL ON TABLE "public"."uploaded_documents" TO "anon";
 GRANT ALL ON TABLE "public"."uploaded_documents" TO "authenticated";
 GRANT ALL ON TABLE "public"."uploaded_documents" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."user_affiliations" TO "service_role";
+GRANT SELECT,DELETE ON TABLE "public"."user_affiliations" TO "authenticated";
+
+
+
+GRANT INSERT("user_id") ON TABLE "public"."user_affiliations" TO "authenticated";
+
+
+
+GRANT INSERT("affiliation"),UPDATE("affiliation") ON TABLE "public"."user_affiliations" TO "authenticated";
+
+
+
+GRANT INSERT("source"),UPDATE("source") ON TABLE "public"."user_affiliations" TO "authenticated";
 
 
 
