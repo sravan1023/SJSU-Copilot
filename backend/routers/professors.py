@@ -3,7 +3,9 @@ from pathlib import Path
 
 import pandas as pd
 from pydantic import BaseModel
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from auth import require_user
 
 router = APIRouter(tags=["professors"])
 
@@ -21,7 +23,7 @@ class ProfessorQuery(BaseModel):
     message: str
 
 
-@router.post("/professors")
+@router.post("/professors", dependencies=[Depends(require_user)])
 def search_professors(query: ProfessorQuery):
     """Keyword search over professor office hours Excel data."""
     question = query.message.lower()

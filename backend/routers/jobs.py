@@ -1,10 +1,18 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from auth import require_capability
 from services.intern_jobs_pipeline import execute_intern_jobs_pipeline
 from services.job_fetcher import run_job_fetch_cycle
 
 router = APIRouter(tags=["jobs"])
+
+# Both endpoints drive write pipelines with the Supabase service role, so they
+# are gated on a grant in public.admin_grants rather than on being signed in.
+# Note this does NOT honour AUTH_OPTIONAL (see auth.auth_optional), and that
+# until 20260917000200 is pushed to a project, admin_grants does not exist there
+# and these fail closed with 503.
+RUN_JOBS = Depends(require_capability("run_jobs"))
 
 
 class JobFetchRequest(BaseModel):
@@ -13,7 +21,7 @@ class JobFetchRequest(BaseModel):
     experience_level: str | None = None
 
 
-@router.post("/jobs/fetch")
+@router.post("/jobs/fetch", dependencies=[RUN_JOBS])
 async def fetch_jobs(req: JobFetchRequest = JobFetchRequest()):
     """
     Trigger a job fetch cycle. Fetches from the Cloudflare Worker (if
@@ -32,7 +40,7 @@ async def fetch_jobs(req: JobFetchRequest = JobFetchRequest()):
     return result
 
 
-@router.post("/intern-jobs/run")
+@router.post("/intern-jobs/run", dependencies=[RUN_JOBS])
 async def run_intern_jobs_pipeline():
     """
     Execute the intern jobs pipeline: pull top 100 jobs from Airtable,

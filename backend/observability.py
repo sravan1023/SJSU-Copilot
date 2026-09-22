@@ -30,8 +30,9 @@ class _Trace:
     def __init__(self, request_id: str):
         self.request_id = request_id
         self.start = time.perf_counter()
-        # No authentication exists yet. Reported as 0 so
-        # the field is already in every line when auth lands.
+        # Seeded so the key is in every line even on a route with no principal
+        # dependency. auth.py measures itself onto request.state (it runs before
+        # this trace exists) and routers/chat.py adds the real duration here.
         self.stages: dict[str, float] = {"auth_verify": 0.0}
         self.marks: dict[str, float] = {}
         self.counters: dict[str, int | str] = {}

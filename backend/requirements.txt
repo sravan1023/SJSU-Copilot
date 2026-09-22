@@ -7,4 +7,6 @@ openpyxl>=3.1.0
 pydantic>=2.10.0
 ddgs>=3.0.0
 beautifulsoup4>=4.12.0
+# [crypto] pulls `cryptography`, needed for the ES256 keys Supabase signs with.
+PyJWT[crypto]>=2.10.0
 

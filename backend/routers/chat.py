@@ -6,10 +6,11 @@ import uuid
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 import observability
+from auth import Principal, require_user
 from services.llm import stream_chat, generate_title
 from services.web_search import build_rag_prompt
 from services.conversation_state import (
@@ -111,7 +112,11 @@ async def _retrieve_with_keepalive(messages: list[dict], request_id: str):
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest, request: Request):
+async def chat(
+    req: ChatRequest,
+    request: Request,
+    principal: Principal = Depends(require_user),
+):
     messages = [m.model_dump() for m in req.messages]
     request_id = _request_id(request)
 
@@ -124,6 +129,10 @@ async def chat(req: ChatRequest, request: Request):
         # StreamingResponse finishes when the response object is returned, not
         # when the stream drains, so it would record ~0 ms for every chat.
         trace = observability.begin(request_id)
+        # auth.py timed itself onto request.state, because a dependency runs
+        # before this generator and so before the trace ContextVar is set.
+        observability.add_stage("auth_verify", getattr(request.state, "auth_verify_ms", 0.0))
+        observability.record("principal", principal.kind)
         observability.record("history_messages", len(messages))
         outcome = "ok"
         try:
@@ -209,7 +218,10 @@ async def chat(req: ChatRequest, request: Request):
 
 
 @router.post("/auto-behavior")
-async def auto_behavior(req: AutoBehaviorRequest):
+async def auto_behavior(
+    req: AutoBehaviorRequest,
+    principal: Principal = Depends(require_user),
+):
     """Return what the backend auto-detected for this conversation."""
     messages = [m.model_dump() for m in req.messages]
     state = analyze_conversation_state(messages)
@@ -221,6 +233,6 @@ async def auto_behavior(req: AutoBehaviorRequest):
 
 
 @router.post("/generate-title")
-async def title(req: TitleRequest):
+async def title(req: TitleRequest, principal: Principal = Depends(require_user)):
     result = await generate_title(req.message)
     return {"title": result}

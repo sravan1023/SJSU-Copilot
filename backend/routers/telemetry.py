@@ -8,8 +8,11 @@ the log, one JSON line per event, keyed by the same request_id the server's
 is measurement, not analytics, and a write on the chat path's neighbour would
 cost more than it tells us.
 
-Unauthenticated, like the rest of the API for now, so the shape is tight:
-numbers and short labels only, bounded counts, no free text.
+Deliberately unauthenticated, even now that the rest of the API is not. The
+browser posts this with keepalive on pagehide (UI/src/services/
+telemetryService.ts), routinely after sign-out, and awaiting a token inside that
+flush would drop the batch. The shape stays tight instead: numbers and short
+labels only, bounded counts, no free text.
 """
 import logging
 from typing import Literal

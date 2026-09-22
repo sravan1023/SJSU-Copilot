@@ -215,13 +215,30 @@ def test_lifespan_creates_and_closes_clients():
     async def drive():
         _check("no provider client before startup", runtime.get_provider_client() is None)
         _check("no crawl client before startup", runtime.get_crawl_client() is None)
+        _check("no supabase client before startup", runtime.get_supabase_client() is None)
 
         async with runtime.lifespan(None):
             provider = runtime.get_provider_client()
             crawl = runtime.get_crawl_client()
+            supabase = runtime.get_supabase_client()
             _check("provider client created", provider is not None)
             _check("crawl client created", crawl is not None)
+            _check("supabase client created", supabase is not None)
             _check("clients are distinct", provider is not crawl)
+            _check(
+                "supabase client is its own",
+                supabase is not provider and supabase is not crawl,
+            )
+            _check(
+                "supabase client does not follow redirects",
+                supabase.follow_redirects is False,
+                "a redirect must never carry the service key to another host",
+            )
+            _check(
+                "supabase client carries no default credential",
+                "authorization" not in {k.lower() for k in supabase.headers},
+                str(list(supabase.headers)),
+            )
             _check(
                 "crawler does not follow redirects",
                 crawl.follow_redirects is False,
@@ -249,6 +266,7 @@ def test_lifespan_creates_and_closes_clients():
 
         _check("provider client cleared after shutdown", runtime.get_provider_client() is None)
         _check("crawl client cleared after shutdown", runtime.get_crawl_client() is None)
+        _check("supabase client cleared after shutdown", runtime.get_supabase_client() is None)
         _check("executor cleared after shutdown", runtime.get_executor() is None)
         _check("search pool cleared after shutdown", runtime.get_search_executor() is None)
 
