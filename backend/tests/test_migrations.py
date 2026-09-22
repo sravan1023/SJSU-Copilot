@@ -195,6 +195,41 @@ def test_ats_registry_has_rls():
     _check("RLS is enabled on ats_registry", enabled)
 
 
+# `revoke update (role) on ...`, `revoke select (email) on ...` -- a privilege
+# name followed by a column list.
+COLUMN_REVOKE_RE = re.compile(
+    r"revoke\s+(select|insert|update|references)\s*\(", re.IGNORECASE
+)
+
+
+def test_no_column_level_revoke():
+    """PostgreSQL cannot revoke a column privilege against a table-level grant.
+
+    Live holds `GRANT ALL ON TABLE public.profiles TO authenticated`, so
+    `revoke update (role) on public.profiles from authenticated` emits
+    `WARNING: no privileges could be revoked for column "role"` and changes
+    nothing -- silently, while looking exactly like a lockdown.
+
+    The working form is to revoke the whole privilege and grant an explicit
+    column allowlist back, as 20260917000200 does.
+
+    This is a static check because the failure mode is silence: nothing raises,
+    and the migration reports success.
+    """
+    print("\n[3.3] no migration tries to revoke a single column's privilege")
+    offenders = []
+    for path in _files():
+        sql = _strip_comments(path.read_text(encoding="utf-8"))
+        if COLUMN_REVOKE_RE.search(sql):
+            offenders.append(path.name)
+
+    _check(
+        "no column-level revoke (it is a silent no-op against a table grant)",
+        not offenders,
+        "; ".join(offenders),
+    )
+
+
 def run():
     test_versions_are_unique()
     test_versions_are_numeric()
@@ -203,6 +238,7 @@ def run():
     test_priority_stack_added_before_it_is_altered()
     test_on_conflict_user_id_is_gone()
     test_ats_registry_has_rls()
+    test_no_column_level_revoke()
 
     print("\n" + "=" * 60)
     print(f"  Passed: {PASS}")

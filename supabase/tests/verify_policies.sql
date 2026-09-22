@@ -247,10 +247,102 @@ select pg_temp.expect_rows('bob DELETE alice memories',
   0, 'authenticated', '22222222-2222-2222-2222-222222222222');
 
 \echo ''
-\echo '=== 12. profiles.role is still self-writable (NOT yet fixed) ==='
-select pg_temp.expect_rows('alice sets own role to admin',
+\echo '=== 12. profiles: privilege columns frozen, editable columns still work ==='
+-- Was, from 2026-09-16 until 20260917000200 landed:
+--   expect_rows('alice sets own role to admin', ..., 1)
+-- i.e. this section asserted the escalation SUCCEEDED, deliberately, so the fix
+-- would have something to flip. The assertion is now expect(..., should_fail)
+-- rather than expect_rows(..., 0), because the column grant makes the statement
+-- RAISE (permission denied) rather than filter to zero rows.
+select pg_temp.expect('alice sets own role to admin',
+  $q$update public.profiles set role = 'admin' where id = '11111111-1111-1111-1111-111111111111'$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('alice sets own email',
+  $q$update public.profiles set email = 'alice@evil.example' where id = '11111111-1111-1111-1111-111111111111'$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('alice inserts a profile naming role',
+  $q$insert into public.profiles (id, email, full_name, role) values ('44444444-4444-4444-4444-444444444444', 'mallory@sjsu.edu', 'M', 'admin')$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('alice deletes own profile',
+  $q$delete from public.profiles where id = '11111111-1111-1111-1111-111111111111'$q$,
+  0, 'authenticated', '11111111-1111-1111-1111-111111111111');
+
+-- The other half of the allowlist, and the one that actually breaks the product
+-- if it is wrong: every column UI/src/components/UserProfile.jsx:80-87 writes,
+-- in one statement, exactly as the client sends it.
+select pg_temp.expect_rows('alice saves the real UserProfile.jsx column set',
+  $q$update public.profiles set full_name = 'Alice A', university_id = '012345678', phone = '408-555-0100', major = 'CS', minor = 'Math', graduation_year = 2027, class_standing = 'Junior', gpa = 3.75 where id = '11111111-1111-1111-1111-111111111111'$q$,
+  1, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('alice sets own active_audience',
+  $q$update public.profiles set active_audience = 'alumni' where id = '11111111-1111-1111-1111-111111111111'$q$,
+  1, 'authenticated', '11111111-1111-1111-1111-111111111111');
+
+-- A column-level grant must not stop the BEFORE trigger from maintaining a
+-- column the user cannot name.
+DO $$
+DECLARE before_ts timestamptz; after_ts timestamptz;
+BEGIN
+  SELECT updated_at INTO before_ts FROM public.profiles WHERE id = '11111111-1111-1111-1111-111111111111';
+  PERFORM pg_sleep(0.01);
+  PERFORM set_config('role', 'authenticated', true);
+  PERFORM set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  UPDATE public.profiles SET full_name = 'Alice B' WHERE id = '11111111-1111-1111-1111-111111111111';
+  PERFORM set_config('role', 'postgres', true);
+  SELECT updated_at INTO after_ts FROM public.profiles WHERE id = '11111111-1111-1111-1111-111111111111';
+  IF after_ts > before_ts THEN RAISE NOTICE '  ok   handle_updated_at still fires under the column allowlist';
+  ELSE RAISE NOTICE '  FAIL updated_at did not move (% -> %)', before_ts, after_ts; END IF;
+END $$;
+
+-- The empirical check. `revoke update (role) ... from authenticated` against a
+-- table-level GRANT ALL is a silent no-op, so asserting the statements ran is
+-- worth nothing -- read the resulting ACL instead. If the revoke ever stops
+-- working, `got` becomes every column on the table and this fails loudly.
+DO $$
+DECLARE got text[];
+        want text[] := array['active_audience','class_standing','full_name','gpa',
+                             'graduation_year','major','minor','onboarded_at',
+                             'phone','university_id'];
+BEGIN
+  SELECT array_agg(column_name::text ORDER BY column_name) INTO got
+    FROM information_schema.column_privileges
+   WHERE table_schema = 'public' AND table_name = 'profiles'
+     AND grantee = 'authenticated' AND privilege_type = 'UPDATE';
+  IF got IS NOT DISTINCT FROM want THEN
+    RAISE NOTICE '  ok   profiles UPDATE allowlist is exactly the 10 expected columns';
+  ELSE
+    RAISE NOTICE '  FAIL profiles UPDATE allowlist is % (want %)', got, want;
+  END IF;
+END $$;
+
+-- The backstop trigger, reached by restoring the grant the revoke removed.
+-- Section 1 sets the precedent for harness-local DDL like this.
+grant update (role) on public.profiles to authenticated;
+select pg_temp.expect_rows('alice updates role with the grant restored',
   $q$update public.profiles set role = 'admin' where id = '11111111-1111-1111-1111-111111111111'$q$,
   1, 'authenticated', '11111111-1111-1111-1111-111111111111');
+DO $$
+DECLARE stored text;
+BEGIN
+  -- A BEFORE trigger returns NEW, so the row IS updated and row_count is 1.
+  -- The value is what matters, not whether the statement touched a row.
+  SELECT role INTO stored FROM public.profiles WHERE id = '11111111-1111-1111-1111-111111111111';
+  IF stored = 'student' THEN RAISE NOTICE '  ok   freeze trigger reverted role to %', stored;
+  ELSE RAISE NOTICE '  FAIL freeze trigger let role become %', stored; END IF;
+END $$;
+revoke update (role) on public.profiles from authenticated;
+
+select pg_temp.expect_rows('service_role sets alice role to advisor',
+  $q$update public.profiles set role = 'advisor' where id = '11111111-1111-1111-1111-111111111111'$q$,
+  1, 'service_role', '11111111-1111-1111-1111-111111111111');
+DO $$
+DECLARE stored text;
+BEGIN
+  SELECT role INTO stored FROM public.profiles WHERE id = '11111111-1111-1111-1111-111111111111';
+  IF stored = 'advisor' THEN RAISE NOTICE '  ok   service_role can still set role';
+  ELSE RAISE NOTICE '  FAIL service_role write was reverted to %', stored; END IF;
+  UPDATE public.profiles SET role = 'student' WHERE id = '11111111-1111-1111-1111-111111111111';
+END $$;
 
 \echo ''
 \echo '=== 13. Reconciled with live (20260915000000_reconcile_live.sql) ==='
@@ -267,4 +359,166 @@ BEGIN
   ELSE RAISE NOTICE '  FAIL missing after reconcile: %', array_to_string(missing, ', '); END IF;
   IF to_regclass('public.chat_messages') IS NULL THEN RAISE NOTICE '  ok   chat_messages retired';
   ELSE RAISE NOTICE '  FAIL chat_messages still exists'; END IF;
+END $$;
+
+\echo ''
+\echo '=== 14. user_affiliations: users declare, never verify ==='
+select pg_temp.expect('alice declares her own affiliation',
+  $q$insert into public.user_affiliations (user_id, affiliation, source) values ('11111111-1111-1111-1111-111111111111', 'alumni', 'self')$q$,
+  false, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('alice claims a VERIFIED affiliation',
+  $q$insert into public.user_affiliations (user_id, affiliation, status) values ('11111111-1111-1111-1111-111111111111', 'faculty', 'verified')$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('alice declares an affiliation for bob',
+  $q$insert into public.user_affiliations (user_id, affiliation) values ('22222222-2222-2222-2222-222222222222', 'faculty')$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+-- `select 1 ... where` rather than count(*): a count always returns one row no
+-- matter what RLS hid, so it could never detect a leak.
+select pg_temp.expect_rows('bob sees no affiliations of alice',
+  $q$select 1 from public.user_affiliations where user_id = '11111111-1111-1111-1111-111111111111'$q$,
+  0, 'authenticated', '22222222-2222-2222-2222-222222222222');
+select pg_temp.expect_rows('alice sets source on her own declared row',
+  $q$update public.user_affiliations set source = 'updated' where user_id = '11111111-1111-1111-1111-111111111111' and affiliation = 'alumni'$q$,
+  1, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('alice promotes her own row to verified',
+  $q$update public.user_affiliations set status = 'verified' where user_id = '11111111-1111-1111-1111-111111111111' and affiliation = 'alumni'$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+
+-- Staff verify the alumni claim, as the service role.
+select pg_temp.expect_rows('service_role verifies the alumni affiliation',
+  $q$update public.user_affiliations set status = 'verified', verified_at = now() where user_id = '11111111-1111-1111-1111-111111111111' and affiliation = 'alumni'$q$,
+  1, 'service_role', '11111111-1111-1111-1111-111111111111');
+
+-- The reason status='declared' is in the UPDATE USING clause and not only in
+-- WITH CHECK. With WITH CHECK alone this would succeed, and alice would hold a
+-- VERIFIED faculty affiliation she was never granted.
+select pg_temp.expect_rows('alice re-points her VERIFIED row at faculty',
+  $q$update public.user_affiliations set affiliation = 'faculty' where user_id = '11111111-1111-1111-1111-111111111111' and status = 'verified'$q$,
+  0, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('alice deletes her VERIFIED row',
+  $q$delete from public.user_affiliations where user_id = '11111111-1111-1111-1111-111111111111' and status = 'verified'$q$,
+  0, 'authenticated', '11111111-1111-1111-1111-111111111111');
+
+-- The backfill in 20260917000100 covers the profiles that existed when it ran.
+-- On a fresh replay that is none: this harness creates its fixture users
+-- afterwards. So re-run the same statement here -- which also exercises its
+-- idempotency, since alice already has a declared alumni row and bob is about
+-- to get a student one in section 18.
+DO $$
+DECLARE missing int; verified int; promoted int;
+BEGIN
+  INSERT INTO public.user_affiliations (user_id, affiliation, status, source)
+  SELECT p.id, 'student'::public.affiliation_kind,
+         'declared'::public.verification_status, 'legacy_backfill'
+    FROM public.profiles p
+  ON CONFLICT (user_id, affiliation) DO NOTHING;
+
+  SELECT count(*) INTO missing
+    FROM public.profiles p
+   WHERE NOT EXISTS (
+     SELECT 1 FROM public.user_affiliations a
+      WHERE a.user_id = p.id AND a.affiliation = 'student');
+  IF missing = 0 THEN RAISE NOTICE '  ok   the backfill statement covers every profile';
+  ELSE RAISE NOTICE '  FAIL % profiles have no student affiliation', missing; END IF;
+
+  SELECT count(*) INTO verified
+    FROM public.user_affiliations WHERE source = 'legacy_backfill' AND status <> 'declared';
+  IF verified = 0 THEN RAISE NOTICE '  ok   the backfill verified nothing';
+  ELSE RAISE NOTICE '  FAIL % backfilled rows are not declared', verified; END IF;
+
+  -- Alice's alumni row was verified above. The backfill must not have touched
+  -- it, or a re-run would quietly downgrade real verifications.
+  SELECT count(*) INTO promoted
+    FROM public.user_affiliations
+   WHERE user_id = '11111111-1111-1111-1111-111111111111'
+     AND affiliation = 'alumni' AND status = 'verified';
+  IF promoted = 1 THEN RAISE NOTICE '  ok   re-running the backfill left a verified row alone';
+  ELSE RAISE NOTICE '  FAIL the verified alumni row did not survive a backfill re-run'; END IF;
+END $$;
+
+\echo ''
+\echo '=== 15. admin_grants: server-managed only, and has_grant ==='
+select pg_temp.expect('alice grants herself a capability',
+  $q$insert into public.admin_grants (user_id, capability) values ('11111111-1111-1111-1111-111111111111', 'run_jobs')$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('service_role seeds a grant for alice',
+  $q$insert into public.admin_grants (user_id, capability) values ('11111111-1111-1111-1111-111111111111', 'run_jobs')$q$,
+  false, 'service_role', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('a malformed capability is rejected at seed time',
+  $q$insert into public.admin_grants (user_id, capability) values ('22222222-2222-2222-2222-222222222222', 'Run Jobs')$q$,
+  true, 'service_role', '22222222-2222-2222-2222-222222222222');
+select pg_temp.expect_rows('alice reads her own grant',
+  $q$select 1 from public.admin_grants where user_id = '11111111-1111-1111-1111-111111111111'$q$,
+  1, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('bob reads alice grants',
+  $q$select 1 from public.admin_grants where user_id = '11111111-1111-1111-1111-111111111111'$q$,
+  0, 'authenticated', '22222222-2222-2222-2222-222222222222');
+select pg_temp.expect_rows('alice cannot update her grant',
+  $q$update public.admin_grants set capability = 'run_ingestion' where user_id = '11111111-1111-1111-1111-111111111111'$q$,
+  0, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('alice cannot delete her grant',
+  $q$delete from public.admin_grants where user_id = '11111111-1111-1111-1111-111111111111'$q$,
+  0, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('has_grant is true for alice',
+  $q$select 1 where public.has_grant('run_jobs')$q$,
+  1, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('has_grant is false for bob',
+  $q$select 1 where public.has_grant('run_jobs')$q$,
+  0, 'authenticated', '22222222-2222-2222-2222-222222222222');
+select pg_temp.expect('anon cannot execute has_grant',
+  $q$select public.has_grant('run_jobs')$q$,
+  true, 'anon');
+
+insert into public.admin_grants (user_id, capability, expires_at)
+  values ('22222222-2222-2222-2222-222222222222', 'run_jobs', now() - interval '1 day');
+select pg_temp.expect_rows('an expired grant does not count',
+  $q$select 1 where public.has_grant('run_jobs')$q$,
+  0, 'authenticated', '22222222-2222-2222-2222-222222222222');
+
+\echo ''
+\echo '=== 16. profile_audience_details ==='
+select pg_temp.expect('alice writes her own audience details',
+  $q$insert into public.profile_audience_details (user_id, audience, details) values ('11111111-1111-1111-1111-111111111111', 'alumni', '{"employer":"Acme"}'::jsonb)$q$,
+  false, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('alice writes details for bob',
+  $q$insert into public.profile_audience_details (user_id, audience, details) values ('22222222-2222-2222-2222-222222222222', 'alumni', '{}'::jsonb)$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('bob reads alice details',
+  $q$select 1 from public.profile_audience_details where user_id = '11111111-1111-1111-1111-111111111111'$q$,
+  0, 'authenticated', '22222222-2222-2222-2222-222222222222');
+select pg_temp.expect('an oversized details blob is rejected',
+  $q$insert into public.profile_audience_details (user_id, audience, details) values ('11111111-1111-1111-1111-111111111111', 'faculty', jsonb_build_object('bio', repeat('x', 9000)))$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('an unknown audience is rejected',
+  $q$insert into public.profile_audience_details (user_id, audience, details) values ('11111111-1111-1111-1111-111111111111', 'martian', '{}'::jsonb)$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+
+\echo ''
+\echo '=== 17. conversations.audience snapshot ==='
+select pg_temp.expect_rows('alice stamps her own conversation',
+  $q$update public.conversations set audience = 'alumni' where user_id = '11111111-1111-1111-1111-111111111111'$q$,
+  1, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('an unknown audience is rejected',
+  $q$update public.conversations set audience = 'martian' where user_id = '11111111-1111-1111-1111-111111111111'$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('bob stamps alice conversation',
+  $q$update public.conversations set audience = 'faculty' where user_id = '11111111-1111-1111-1111-111111111111'$q$,
+  0, 'authenticated', '22222222-2222-2222-2222-222222222222');
+
+\echo ''
+\echo '=== 18. Column-level INSERT grants still let defaults apply ==='
+-- The user_affiliations design leans on this: authenticated cannot NAME status,
+-- so the column default has to supply it. Measured, not assumed.
+-- 'community' rather than 'student': section 14 re-runs the backfill, which
+-- gives every profile a student row, so that one would collide.
+select pg_temp.expect('bob declares an affiliation naming only the granted columns',
+  $q$insert into public.user_affiliations (user_id, affiliation) values ('22222222-2222-2222-2222-222222222222', 'community')$q$,
+  false, 'authenticated', '22222222-2222-2222-2222-222222222222');
+DO $$
+DECLARE got text;
+BEGIN
+  SELECT status::text INTO got FROM public.user_affiliations
+   WHERE user_id = '22222222-2222-2222-2222-222222222222' AND affiliation = 'community';
+  IF got = 'declared' THEN RAISE NOTICE '  ok   default status applied under a column grant (%)', got;
+  ELSE RAISE NOTICE '  FAIL status came out as %', got; END IF;
 END $$;
