@@ -549,10 +549,95 @@ def test_guest_session_mints_a_token_that_verifies():
         assert _chat(token=body["token"]).status_code == 200
 
 
-def test_guest_session_is_unavailable_without_a_secret():
-    """Fails closed: minting a token no one could verify helps nobody."""
-    res = _request("POST", "/api/guest/session", env={"GUEST_JWT_SECRET": ""}, json=None)
+def test_guest_session_is_unavailable_without_any_key_material():
+    """Fails closed: minting a token no one could verify helps nobody.
+
+    Both sources have to be absent. With SUPABASE_SERVICE_KEY present the key
+    is derived, which is the normal case.
+    """
+    res = _request(
+        "POST",
+        "/api/guest/session",
+        env={"GUEST_JWT_SECRET": "", "SUPABASE_SERVICE_KEY": ""},
+        json=None,
+    )
     assert res.status_code == 503
+
+
+# ── 4c. The guest signing key ─────────────────────────────────────────────────
+
+
+def test_the_guest_key_is_derived_when_none_is_configured():
+    """Guests must work anywhere the app works, with nothing extra to set.
+
+    The first version required its own GUEST_JWT_SECRET, so guest access was
+    503 on every machine where nobody had pasted a value -- silently, because
+    every signed-in path kept working.
+    """
+    env = {"SUPABASE_SERVICE_KEY": "service-key-for-derivation", "GUEST_JWT_SECRET": ""}
+    with patch.dict(os.environ, {**ENV, **env}):
+        assert auth.guest_key_source() == "derived"
+        key = auth.guest_secret()
+        assert key, "a service key must be enough to run guest sessions"
+        assert auth.guest_secret() == key, "derivation must be stable"
+
+
+def test_the_derived_key_is_not_the_service_key():
+    """Domain separation actually applied, not just described.
+
+    HKDF is one-way, so the service key cannot be recovered from this -- the
+    derivation is not a path from a low-value secret to a high-value one.
+    """
+    parent = "service-key-for-derivation"
+    with patch.dict(os.environ, {**ENV, "SUPABASE_SERVICE_KEY": parent, "GUEST_JWT_SECRET": ""}):
+        derived = auth.guest_secret()
+    assert derived != parent
+    assert parent not in derived
+
+
+def test_a_different_service_key_derives_a_different_guest_key():
+    with patch.dict(os.environ, {**ENV, "SUPABASE_SERVICE_KEY": "key-a", "GUEST_JWT_SECRET": ""}):
+        a = auth.guest_secret()
+    with patch.dict(os.environ, {**ENV, "SUPABASE_SERVICE_KEY": "key-b", "GUEST_JWT_SECRET": ""}):
+        b = auth.guest_secret()
+    assert a != b
+
+
+def test_an_explicit_key_overrides_the_derived_one():
+    """For anyone wanting the guest key rotatable on its own schedule."""
+    env = {"SUPABASE_SERVICE_KEY": "service-key", "GUEST_JWT_SECRET": "chosen-by-hand"}
+    with patch.dict(os.environ, {**ENV, **env}):
+        assert auth.guest_key_source() == "explicit"
+        assert auth.guest_secret() == "chosen-by-hand"
+
+
+def test_a_derived_key_mints_a_token_that_verifies():
+    """The round trip, with no GUEST_JWT_SECRET anywhere -- the default case."""
+    env = {"GUEST_JWT_SECRET": "", "SUPABASE_SERVICE_KEY": "service-key-for-derivation"}
+    res = _request("POST", "/api/guest/session", env=env, json=None)
+    assert res.status_code == 200
+
+    with patch("routers.chat.build_rag_prompt", _no_rag),          respx.mock(assert_all_called=False) as mock:
+        from services import llm
+
+        mock.post(llm.GROQ_API_URL).mock(return_value=_groq_ok())
+        assert _chat(token=res.json()["token"], env=env).status_code == 200
+
+
+def test_two_instances_with_the_same_service_key_accept_each_others_tokens():
+    """Every instance derives the same key, so tokens survive a restart, a
+    second worker and a second host -- which a per-process random key would
+    not."""
+    env = {"GUEST_JWT_SECRET": "", "SUPABASE_SERVICE_KEY": "shared-service-key"}
+
+    minted = _request("POST", "/api/guest/session", env=env, json=None).json()["token"]
+    auth._derived_guest_keys.clear()  # as if a fresh process picked it up
+
+    with patch("routers.chat.build_rag_prompt", _no_rag),          respx.mock(assert_all_called=False) as mock:
+        from services import llm
+
+        mock.post(llm.GROQ_API_URL).mock(return_value=_groq_ok())
+        assert _chat(token=minted, env=env).status_code == 200
 
 
 def test_a_guest_may_use_the_chat_path():
@@ -682,15 +767,34 @@ def test_startup_states_the_auth_posture():
     assert enforced[0].auth_optional is False
 
     # guest_sessions is on the line because its failure mode is otherwise
-    # invisible: with no secret, POST /api/guest/session answers 503 and no
+    # invisible: with no key, POST /api/guest/session answers 503 and no
     # visitor can use the app while every signed-in path keeps working.
+    # guest_key says where the key came from, so an operator can tell a
+    # deliberate override from an accident.
     assert enforced[0].guest_sessions is True
 
-    without = [
-        r for r in posture({"GUEST_JWT_SECRET": ""})
+    # The default path: no GUEST_JWT_SECRET anywhere. conftest sets one
+    # session-wide to exercise the override, so it is cleared here.
+    derived = [
+        r for r in posture({"GUEST_JWT_SECRET": "", "SUPABASE_SERVICE_KEY": "svc"})
         if r.getMessage() == "auth enforced"
     ]
-    assert without[0].guest_sessions is False
+    assert derived[0].guest_sessions is True, "a service key must be enough"
+    assert derived[0].guest_key == "derived", "the default needs no configuration"
+
+    explicit = [
+        r for r in posture({"GUEST_JWT_SECRET": "set-by-hand"})
+        if r.getMessage() == "auth enforced"
+    ]
+    assert explicit[0].guest_key == "explicit"
+
+    # Only with neither source are guests actually off.
+    off = [
+        r for r in posture({"GUEST_JWT_SECRET": "", "SUPABASE_SERVICE_KEY": ""})
+        if r.getMessage() == "auth enforced"
+    ]
+    assert off[0].guest_sessions is False
+    assert off[0].guest_key == "missing"
 
 
 def test_the_timing_line_carries_the_principal():

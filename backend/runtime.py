@@ -209,15 +209,22 @@ async def lifespan(app):
     # missing header is a privilege escalation rather than a convenience.
     #
     # guest_sessions is here because its failure mode is otherwise invisible:
-    # without the secret, POST /api/guest/session answers 503 and no visitor
-    # can use the app, while every signed-in path keeps working normally.
+    # without a key, POST /api/guest/session answers 503 and no visitor can use
+    # the app, while every signed-in path keeps working normally. guest_key
+    # says where the key came from -- "derived" from SUPABASE_SERVICE_KEY is
+    # the normal case and needs no configuration, "explicit" means someone set
+    # GUEST_JWT_SECRET, "missing" means guests are off.
+    from auth import guest_key_source
+
+    key_source = guest_key_source()
     logger.info(
         "auth enforced",
         extra={
             "auth_optional": False,
             "jwks": _jwks_client is not None,
             "hs256_secret": bool(os.getenv("SUPABASE_JWT_SECRET")),
-            "guest_sessions": bool(os.getenv("GUEST_JWT_SECRET", "").strip()),
+            "guest_sessions": key_source != "missing",
+            "guest_key": key_source,
         },
     )
 

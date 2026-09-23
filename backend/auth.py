@@ -27,6 +27,7 @@ import-time constants (services/job_fetcher.py:21-24), but the test suite has no
 monkeypatch fixture and overrides env with `patch.dict(os.environ, ...)`, which
 only works for call-time reads.
 """
+import base64
 import logging
 import os
 import time
@@ -103,9 +104,89 @@ class Principal:
         return f"{GUEST_SUB_PREFIX}{self.guest_id}"
 
 
+# Domain separation label for the derived guest key. Changing this string
+# invalidates every guest token signed with the old one, which is harmless --
+# they last two hours and the client mints a new session on a 401.
+_GUEST_KEY_INFO = b"sjsu-copilot/guest-session/v1"
+
+# sub -> derived key. HKDF is one HMAC, but deriving per request is still
+# pointless work on the chat path.
+_derived_guest_keys: dict[str, str] = {}
+
+
+def _derive_guest_key(parent: str) -> str:
+    """HKDF-SHA256 a guest signing key out of a secret the app already has."""
+    cached = _derived_guest_keys.get(parent)
+    if cached is not None:
+        return cached
+
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    raw = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=_GUEST_KEY_INFO,
+    ).derive(parent.encode("utf-8"))
+
+    key = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    # One entry in practice; bounded anyway so a test that patches the parent
+    # repeatedly cannot grow it without limit.
+    if len(_derived_guest_keys) > 8:
+        _derived_guest_keys.clear()
+    _derived_guest_keys[parent] = key
+    return key
+
+
 def guest_secret() -> str:
-    """HMAC key for guest tokens. Empty means guest sessions are unavailable."""
-    return os.getenv("GUEST_JWT_SECRET", "").strip()
+    """HMAC key for guest tokens. Empty means guest sessions are unavailable.
+
+    **Derived by default, from SUPABASE_SERVICE_KEY.** The first version of
+    this required its own `GUEST_JWT_SECRET`, which meant guest access silently
+    404'd into a 503 on every machine where somebody had not set it -- while
+    every signed-in path kept working, so nobody would notice. A feature that
+    only works where one person remembered to paste a value is not shipped.
+
+    Deriving is safe here, and specifically safer than it sounds:
+
+    * **The guest key protects almost nothing.** Its only job is to stop a
+      client inventing its own guest id. A valid guest token is something
+      anyone can obtain by calling POST /api/guest/session -- that is what the
+      endpoint is for. An attacker holding the derived key gains the ability to
+      mint what they could already ask for.
+    * **HKDF is one-way.** The service key cannot be recovered from the derived
+      key, so this is not a path from a low-value secret to a high-value one.
+    * **Domain separation is the point.** "Don't reuse a secret for two
+      purposes" is the rule; HKDF with a distinct `info` label is the standard
+      answer to it, not a way around it.
+    * **Every instance derives the same key**, so tokens verify across workers,
+      restarts and hosts -- which a randomly generated per-process key would
+      not manage.
+
+    `SUPABASE_SERVICE_KEY` is already required for capability checks and both
+    job pipelines, so anywhere the app meaningfully runs, guests now work.
+
+    An explicit `GUEST_JWT_SECRET` still wins, for anyone who wants the guest
+    key rotatable independently of the service key.
+    """
+    explicit = os.getenv("GUEST_JWT_SECRET", "").strip()
+    if explicit:
+        return explicit
+
+    parent = os.getenv("SUPABASE_SERVICE_KEY", "").strip()
+    if not parent:
+        return ""
+    return _derive_guest_key(parent)
+
+
+def guest_key_source() -> Literal["explicit", "derived", "missing"]:
+    """Where the guest key came from. For the startup posture line."""
+    if os.getenv("GUEST_JWT_SECRET", "").strip():
+        return "explicit"
+    if os.getenv("SUPABASE_SERVICE_KEY", "").strip():
+        return "derived"
+    return "missing"
 
 
 def _supabase_url() -> str:
