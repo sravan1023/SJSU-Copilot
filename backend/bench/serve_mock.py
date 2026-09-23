@@ -85,6 +85,15 @@ def run():
     os.environ["GROQ_API_URL"] = f"http://127.0.0.1:{args.upstream_port}/openai/v1/chat/completions"
     os.environ["GROQ_API_KEY"] = "mock-key"
 
+    # run_bench.py opens one guest session and drives every request through it,
+    # so a concurrency sweep is one principal making N simultaneous calls --
+    # exactly what the limiter exists to stop. Measuring latency is not abuse,
+    # so it is off here and only here.
+    os.environ["RATE_LIMIT_ENABLED"] = "false"
+    # Local-only signing key, so the harness can mint the session it needs
+    # without a real .env. Never reaches a network.
+    os.environ.setdefault("GUEST_JWT_SECRET", "bench-mock-guest-secret-not-a-real-key")
+
     import uvicorn
 
     from bench import mock_upstream

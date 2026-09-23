@@ -63,7 +63,31 @@ def _ms(start):
     return round((time.perf_counter() - start) * 1000, 1)
 
 
-async def _one(client, base_url, model, question, request_id):
+async def _acquire_guest_token(client, base_url):
+    """Get a session the way a visitor's browser does.
+
+    The harness used to post with no Authorization header at all and relied on
+    AUTH_OPTIONAL to let it through. That flag is gone -- it was a switch that
+    admitted unauthenticated callers, which stops being tolerable once a guest
+    principal is a legitimate one. Minting a real token here means the bench
+    now measures the same code path a real request takes, verification
+    included, instead of one that skipped it.
+
+    Also note the limiter: a sweep at concurrency N will trip the per-principal
+    budget, because every request shares this one guest id. Set
+    RATE_LIMIT_ENABLED=false on the server for sweeps, which is what
+    bench/serve_mock.py does.
+    """
+    res = await client.post(f"{base_url}/api/guest/session")
+    if res.status_code != 200:
+        raise SystemExit(
+            f"could not start a guest session ({res.status_code}). "
+            "Is GUEST_JWT_SECRET set on the server? It answers 503 without one."
+        )
+    return res.json()["token"]
+
+
+async def _one(client, base_url, model, question, request_id, headers=None):
     record = {
         "request_id": request_id,
         "id": question["id"],
@@ -81,8 +105,17 @@ async def _one(client, base_url, model, question, request_id):
         async with client.stream(
             "POST",
             f"{base_url}/api/chat",
-            json={"messages": question["messages"], "model": model},
-            headers={"x-request-id": request_id},
+            # questions.jsonl already labels every question with the audience
+            # it belongs to, so the sweep exercises all four prompt variants
+            # and all four source scopings rather than measuring 'student' 40
+            # times. This is what makes a before/after diff of sources per
+            # audience possible after a retrieval change.
+            json={
+                "messages": question["messages"],
+                "model": model,
+                "audience": question["audience"],
+            },
+            headers={**(headers or {}), "x-request-id": request_id},
         ) as res:
             record["http_status"] = res.status_code
             record["headers_ms"] = _ms(start)
@@ -132,8 +165,12 @@ async def _run(args):
 
     limits = httpx.Limits(max_connections=args.concurrency + 2, max_keepalive_connections=args.concurrency)
     async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=10), limits=limits) as client:
+        token = await _acquire_guest_token(client, base_url)
+        headers = {"Authorization": f"Bearer {token}"}
+        meta["principal"] = "guest"
+
         for i in range(min(args.warmup, len(questions))):
-            await _one(client, base_url, args.model, questions[i], f"warm-{run_id}-{i}")
+            await _one(client, base_url, args.model, questions[i], f"warm-{run_id}-{i}", headers)
 
         queue: asyncio.Queue = asyncio.Queue()
         for i, q in enumerate(questions):
@@ -146,7 +183,7 @@ async def _run(args):
                     i, q = queue.get_nowait()
                 except asyncio.QueueEmpty:
                     return
-                results.append({**meta, **await _one(client, base_url, args.model, q, f"bench-{run_id}-{i:04d}")})
+                results.append({**meta, **await _one(client, base_url, args.model, q, f"bench-{run_id}-{i:04d}", headers)})
                 done = len(results)
                 print(f"\r  {done}/{len(questions)}", end="", flush=True)
                 if args.pace:

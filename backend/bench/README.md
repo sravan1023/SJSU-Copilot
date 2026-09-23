@@ -71,12 +71,53 @@ time-sensitive, ambiguous follow-up, long conversation, restricted request). The
 same set can serve a model comparison. Edit `make_questions.py` and re-run it,
 rather than editing the JSONL by hand.
 
+## Turn signatures (refactor safety net)
+
+`run_bench` measures *how long* a turn took. `turn_signature.py` answers a
+different question — *which stages it reached* — and exists because the UI has
+no test runner, so a refactor of the three handlers in `UI/src/App.jsx` has no
+other automated check.
+
+The signature is the set of `(kind, outcome, sorted mark names)` across a run.
+Mark values move every run and are ignored; names and outcomes do not move
+unless behaviour did.
+
+**Capture without touching git state.** The backend writes JSON lines to
+stdout, so redirect it:
+
+```powershell
+# --- after (the working tree) ---
+.venv\Scripts\python -m uvicorn main:app --port 8000 *> bench\results\after.jsonl
+#   in another shell: cd UI; npm run dev   -- then drive the matrix below
+.venv\Scripts\python -m bench.turn_signature --capture bench\results\after.jsonl --out bench\results\after.sig
+
+# --- before (the committed version) ---
+Copy-Item ..\UI\src\App.jsx $env:TEMP\App.jsx.work
+git -C .. checkout -- UI/src/App.jsx
+#   restart both servers, drive the same matrix
+.venv\Scripts\python -m bench.turn_signature --capture bench\results\before.jsonl --out bench\results\before.sig
+Copy-Item $env:TEMP\App.jsx.work ..\UI\src\App.jsx      # restore
+
+.venv\Scripts\python -m bench.turn_signature --diff bench\results\before.sig bench\results\after.sig
+```
+
+Exit 0 and "identical" means every turn shape survived. Exit 1 prints which
+shapes appeared or vanished and which stage each missing mark belongs to.
+
+**The matrix** — 9 cases, {send, regenerate, edit} × {happy, stop mid-stream,
+forced network error}. For the error column, run the dev server with
+`VITE_API_BASE=http://127.0.0.1:9` so the fetch fails fast.
+
+**Close the tab before reading the log.** `telemetryService` flushes every 10s,
+at 20 queued events, and on `pagehide`; a tab left open can be holding the last
+batch.
+
 ## Not measured here
 
 - **Persistence**: Supabase saves happen in the browser.
   `UI/src/services/telemetryService.ts` records `user_saved` and
   `assistant_saved` and posts them to `/api/telemetry`, which logs them as
-  `client timings` lines.
+  `client timings` lines. `turn_signature.py` above reads exactly those lines.
 - **Guest vs registered**: no guest sessions exist yet.
 - **Deployment effects** (cold starts, region, proxy buffering): no deployment
   config exists yet.
