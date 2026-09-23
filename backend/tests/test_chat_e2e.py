@@ -18,11 +18,13 @@ import respx
 import main
 from services import llm
 
+from .conftest import AUTH_HEADERS
+
 SOURCES = [{"title": "Drop calendar", "url": "https://www.sjsu.edu/ue/drops/calendar.php"}]
 RAG = "Context:\n[1] Drop calendar - https://www.sjsu.edu/ue/drops/calendar.php\nLast day to drop: Sep 15."
 
 
-async def _rag(messages):
+async def _rag(messages, audience=None):
     return RAG, SOURCES
 
 
@@ -48,7 +50,7 @@ def _chat(body, groq_response):
     async def go():
         transport = httpx.ASGITransport(app=main.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            res = await client.post("/api/chat", json=body)
+            res = await client.post("/api/chat", json=body, headers=AUTH_HEADERS)
             return [json.loads(line[6:]) for line in res.text.splitlines() if line.startswith("data: ")]
 
     try:

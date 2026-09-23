@@ -23,7 +23,9 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import httpx  # noqa: E402
+import httpx
+
+from .conftest import AUTH_HEADERS  # noqa: E402
 import uvicorn  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -50,7 +52,7 @@ def _check(label, cond, detail=""):
         print(f"  FAIL {label}  {detail}")
 
 
-async def _slow_rag(messages):
+async def _slow_rag(messages, audience=None):
     await asyncio.sleep(RAG_DELAY)
     return "CONTEXT", [{"title": "SJSU", "url": "https://sjsu.edu"}]
 
@@ -79,7 +81,7 @@ def _collect(client, body):
     """
     frames = []
     start = time.monotonic()
-    with client.stream("POST", "/api/chat", json=body) as res:
+    with client.stream("POST", "/api/chat", json=body, headers=AUTH_HEADERS) as res:
         header_time = time.monotonic() - start
         for line in res.iter_lines():
             if not line:
@@ -136,7 +138,7 @@ def _collect_live(base_url, body):
     frames = []
     start = time.monotonic()
     with httpx.Client(timeout=30) as client:
-        with client.stream("POST", f"{base_url}/api/chat", json=body) as res:
+        with client.stream("POST", f"{base_url}/api/chat", json=body, headers=AUTH_HEADERS) as res:
             header_time = time.monotonic() - start
             for line in res.iter_lines():
                 if not line:
@@ -236,7 +238,7 @@ def test_request_id_echoed_in_header():
     print("\n[1.3] X-Request-Id echoes a client-supplied id")
     client = TestClient(main.app)
 
-    async def _fast_rag(messages):
+    async def _fast_rag(messages, audience=None):
         return None, []
 
     with patch("routers.chat.build_rag_prompt", _fast_rag), \
@@ -244,7 +246,7 @@ def test_request_id_echoed_in_header():
         res = client.post(
             "/api/chat",
             json={"messages": [{"role": "user", "content": "hi"}]},
-            headers={"x-request-id": "client-supplied-id"},
+            headers={**AUTH_HEADERS, "x-request-id": "client-supplied-id"},
         )
 
     _check(
@@ -281,7 +283,7 @@ def test_generation_failure_yields_error_frame():
     print("\n[2.2] a crash during generation ends the stream with an error frame")
     client = TestClient(main.app)
 
-    async def _fast_rag(messages):
+    async def _fast_rag(messages, audience=None):
         return None, []
 
     async def _boom_stream(**kwargs):
@@ -316,12 +318,12 @@ def test_request_bounds():
 
     # If a bound leaked through to the handler these would call the real
     # pipeline, so patch it to something that would be obvious in the output.
-    async def _should_not_run(messages):
+    async def _should_not_run(messages, audience=None):
         raise AssertionError("handler ran for a request that should have been rejected")
 
     with patch("routers.chat.build_rag_prompt", _should_not_run):
         for label, body in cases:
-            res = client.post("/api/chat", json=body)
+            res = client.post("/api/chat", json=body, headers=AUTH_HEADERS)
             _check(f"{label} -> 422", res.status_code == 422, f"got {res.status_code}")
 
     _check("MAX_TOTAL_CHARS is below the model's practical limit", MAX_TOTAL_CHARS <= 48_000)

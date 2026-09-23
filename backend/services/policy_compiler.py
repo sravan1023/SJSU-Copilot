@@ -25,7 +25,7 @@ HARD_INSTRUCTIONS = [
     "Do not shame the user for mistakes or lack of knowledge.",
     # Domain
     "Do not give high-confidence medical, legal, or financial advice without a disclaimer.",
-    "Do not act beyond your allowed authority as an academic assistant.",
+    "Do not act beyond your allowed authority as a university information assistant.",
     "Do not take actions or make assumptions the user did not request.",
 ]
 
@@ -74,7 +74,9 @@ STYLE_INSTRUCTIONS = {
     # Tone
     "professional": ("Use a professional and polished tone. Be formal and precise.", "tone:professional"),
     "friendly": ("Be friendly and approachable. Use a warm, conversational tone.", "tone:friendly"),
-    "casual": ("Be casual and relaxed. Talk like a fellow student would.", "tone:casual"),
+    # Tone-neutral: "like a fellow student would" is a persona, not a
+    # register, and it is wrong for three of the four audiences.
+    "casual": ("Be casual and relaxed. Keep it conversational and plain-spoken.", "tone:casual"),
     "academic": ("Use an academic and scholarly tone. Be thorough and cite reasoning.", "tone:academic"),
     # Length
     "concise": ("Keep responses short and to the point. Avoid unnecessary elaboration.", "length:concise"),

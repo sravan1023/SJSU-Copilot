@@ -12,6 +12,8 @@ from fastapi.testclient import TestClient
 import main
 from routers import professors
 
+from .conftest import AUTH_HEADERS
+
 SHEET = pd.DataFrame(
     [["Dr. Ada Lovelace", "Mon/Wed", "2-3pm", "MacQuarrie Hall 215"]],
     columns=["Name", "Day(s)", "Time (s)", "Where"],
@@ -23,8 +25,8 @@ def test_spreadsheet_is_read_once_across_requests():
     client = TestClient(main.app)
     try:
         with patch.object(professors.pd, "read_excel", return_value=SHEET) as read_excel:
-            first = client.post("/api/professors", json={"message": "lovelace"})
-            second = client.post("/api/professors", json={"message": "lovelace hours"})
+            first = client.post("/api/professors", json={"message": "lovelace"}, headers=AUTH_HEADERS)
+            second = client.post("/api/professors", json={"message": "lovelace hours"}, headers=AUTH_HEADERS)
         assert read_excel.call_count == 1
         assert first.status_code == second.status_code == 200
         assert "Lovelace" in first.json()["response"]
@@ -37,7 +39,7 @@ def test_no_match_still_answers():
     client = TestClient(main.app)
     try:
         with patch.object(professors.pd, "read_excel", return_value=SHEET):
-            res = client.post("/api/professors", json={"message": "nobody"})
+            res = client.post("/api/professors", json={"message": "nobody"}, headers=AUTH_HEADERS)
         assert res.json() == {"response": "No matching professor found.", "results": []}
     finally:
         professors._load_data.cache_clear()

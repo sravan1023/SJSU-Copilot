@@ -156,7 +156,7 @@ def test_rewrite_call_is_actually_skipped():
     print("\n[2.3] the provider call is genuinely not made")
     calls = []
 
-    async def counting_rewrite(question):
+    async def counting_rewrite(question, audience=None):
         calls.append(question)
         return question
 

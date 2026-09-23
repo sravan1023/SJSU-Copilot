@@ -140,8 +140,13 @@ def test_is_other_university_and_is_edu():
     _check("example.com NOT detected by _is_edu", not _is_edu("https://example.com/x"))
 
 
-def test_rank_sources_filters_other_universities():
-    print("\n[2.4] rank_sources filters out competitor university results entirely")
+def test_rank_sources_demotes_other_universities_without_dropping_them():
+    print("\n[2.4] other universities are a penalty, not a hard filter")
+    # Changed deliberately in Phase 2. Dropping them outright broke two real
+    # journeys: comparing SJSU's transfer credit against a neighbour's, and a
+    # prospective student weighing up campuses -- which is a first-class guest
+    # question, not an edge case. A penalty keeps SJSU first whenever SJSU has
+    # an answer, and surfaces a neighbour only when nothing else does.
     results = [
         {"url": "https://www.santaclara.edu/cpt-info", "title": "SCU CPT page"},
         {"url": "https://www.stanford.edu/cpt", "title": "Stanford CPT"},
@@ -150,10 +155,70 @@ def test_rank_sources_filters_other_universities():
     ]
     ranked = rank_sources(results)
     urls = [r["url"] for r in ranked]
-    _check("santaclara filtered", "https://www.santaclara.edu/cpt-info" not in urls)
-    _check("stanford filtered", "https://www.stanford.edu/cpt" not in urls)
-    _check("sjsu retained", "https://www.sjsu.edu/global/cpt" in urls)
-    _check("generic retained", "https://example.com/cpt-guide" in urls)
+
+    _check("sjsu still first", urls[0] == "https://www.sjsu.edu/global/cpt", str(urls))
+    _check(
+        "a neighbour ranks below a neutral page",
+        urls.index("https://example.com/cpt-guide") < urls.index("https://www.santaclara.edu/cpt-info"),
+        str(urls),
+    )
+    _check("neighbours are still reachable", "https://www.stanford.edu/cpt" in urls)
+
+    # Blocked domains are a different judgement and stay a hard filter: a
+    # Reddit thread is not a source to cite at any rank.
+    blocked = rank_sources([
+        {"url": "https://www.reddit.com/r/SJSU/comments/x", "title": "thread"},
+        {"url": "https://www.sjsu.edu/page", "title": "sjsu"},
+    ])
+    _check(
+        "blocked domains are still dropped",
+        all("reddit.com" not in r["url"] for r in blocked),
+    )
+
+
+def test_rank_sources_prefers_the_audiences_own_collection():
+    print("\n[2.6] a domain in the audience's collection outranks one outside it")
+    # sjsualumni.org is in the alumni collection and in nobody else's. It is
+    # also not a .edu and not in PREFERRED_DOMAINS, so for any other audience
+    # it scores as a plain third-party page. That difference is the whole point
+    # of sourceCollections, and it is what this pins.
+    results = [
+        {"url": "https://www.sjsualumni.org/transcripts", "title": "Alumni transcripts"},
+        {"url": "https://www.example.com/transcripts", "title": "Some blog"},
+        {"url": "https://harvard.edu/transcripts", "title": "Unrelated .edu"},
+    ]
+
+    alumni = [r["url"] for r in rank_sources(results, "alumni")]
+    _check(
+        "the alumni site leads for an alum",
+        alumni[0] == "https://www.sjsualumni.org/transcripts",
+        str(alumni),
+    )
+
+    student = [r["url"] for r in rank_sources(results, "student")]
+    _check(
+        "for a student it is just another third-party page, so the .edu wins",
+        student[0] == "https://harvard.edu/transcripts",
+        str(student),
+    )
+
+    # sjsu.edu is in every audience's collection, so it is always in the top
+    # tier -- but "top tier" is the claim, not "first". For an alum,
+    # sjsualumni.org is in the same collection and ties with it on score, and
+    # the tie is broken by the order the search returned them. Asserting
+    # position here would be asserting an accident.
+    with_sjsu = results + [{"url": "https://www.sjsu.edu/registrar", "title": "Registrar"}]
+    for audience in ("student", "alumni", "faculty", "guest"):
+        ranked = [r["url"] for r in rank_sources(with_sjsu, audience)]
+        _check(
+            f"sjsu.edu outranks every non-collection domain for {audience}",
+            ranked.index("https://www.sjsu.edu/registrar")
+            < min(
+                ranked.index("https://harvard.edu/transcripts"),
+                ranked.index("https://www.example.com/transcripts"),
+            ),
+            str(ranked),
+        )
 
 
 def test_rank_sources_tiered_scoring():
@@ -323,7 +388,8 @@ def main():
     test_rank_sources_preference_and_blocklist()
     test_rank_sources_dedups()
     test_is_other_university_and_is_edu()
-    test_rank_sources_filters_other_universities()
+    test_rank_sources_demotes_other_universities_without_dropping_them()
+    test_rank_sources_prefers_the_audiences_own_collection()
     test_rank_sources_tiered_scoring()
 
     test_clean_text()

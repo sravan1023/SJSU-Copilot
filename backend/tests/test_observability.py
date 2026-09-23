@@ -19,6 +19,8 @@ from unittest.mock import patch
 import httpx
 from fastapi.testclient import TestClient
 
+from .conftest import AUTH_HEADERS
+
 import main
 import observability
 import runtime
@@ -57,6 +59,8 @@ def _timing_lines(records):
 
 
 def _post(client, content="hi", **kwargs):
+    # Merge, not set: two callers below pass their own headers.
+    kwargs["headers"] = {**AUTH_HEADERS, **kwargs.get("headers", {})}
     res = client.post("/api/chat", json={"messages": [{"role": "user", "content": content}]}, **kwargs)
     frames = [json.loads(line[6:]) for line in res.text.splitlines() if line.startswith("data: ")]
     return res, frames
@@ -145,7 +149,7 @@ def test_flush_with_an_explicit_trace_works_outside_the_context():
 # ── 2. The chat route ─────────────────────────────────────────────────────────
 
 
-async def _no_rag(messages):
+async def _no_rag(messages, audience=None):
     return None, []
 
 
@@ -200,7 +204,7 @@ def test_error_and_upstream_error_outcomes():
 
 def test_timing_line_is_written_when_the_client_disconnects():
     """Timing must survive a client that goes away mid-stream."""
-    async def _slow_rag(messages):
+    async def _slow_rag(messages, audience=None):
         await asyncio.sleep(3)
         return None, []
 
@@ -211,7 +215,7 @@ def test_timing_line_is_written_when_the_client_disconnects():
         with httpx.Client(timeout=10) as http:
             with http.stream("POST", f"{base}/api/chat",
                              json={"messages": [{"role": "user", "content": "hi"}]},
-                             headers={"x-request-id": "gone-early"}) as res:
+                             headers={**AUTH_HEADERS, "x-request-id": "gone-early"}) as res:
                 for line in res.iter_lines():
                     if '"searching"' in line:
                         break  # hang up while retrieval is still running
@@ -233,7 +237,7 @@ SECRET = "ZXQV7781"
 def test_retrieval_is_timed_and_logs_carry_no_user_text():
     client = TestClient(main.app)
 
-    async def _rewrite(question):
+    async def _rewrite(question, audience=None):
         return f"SJSU {SECRET} curricular practical training office"
 
     def _search(query):

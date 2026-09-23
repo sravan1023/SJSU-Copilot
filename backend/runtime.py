@@ -203,22 +203,23 @@ async def lifespan(app):
         extra={"blocking_pool_size": BLOCKING_POOL_SIZE, "search_pool_size": SEARCH_POOL_SIZE},
     )
 
-    # One line either way, so the auth posture is always visible in the log.
-    if os.getenv("AUTH_OPTIONAL", "false").strip().lower() in ("1", "true", "yes"):
-        logger.warning(
-            "AUTH_OPTIONAL is set: requests with no Authorization header are "
-            "treated as anonymous. Do not run this way in deployment.",
-            extra={"auth_optional": True},
-        )
-    else:
-        logger.info(
-            "auth enforced",
-            extra={
-                "auth_optional": False,
-                "jwks": _jwks_client is not None,
-                "hs256_secret": bool(os.getenv("SUPABASE_JWT_SECRET")),
-            },
-        )
+    # The auth posture is always visible in the log. There is no longer a
+    # "requests may arrive unauthenticated" mode: AUTH_OPTIONAL was deleted in
+    # Phase 2, because once guest principals exist a flag that forgives a
+    # missing header is a privilege escalation rather than a convenience.
+    #
+    # guest_sessions is here because its failure mode is otherwise invisible:
+    # without the secret, POST /api/guest/session answers 503 and no visitor
+    # can use the app, while every signed-in path keeps working normally.
+    logger.info(
+        "auth enforced",
+        extra={
+            "auth_optional": False,
+            "jwks": _jwks_client is not None,
+            "hs256_secret": bool(os.getenv("SUPABASE_JWT_SECRET")),
+            "guest_sessions": bool(os.getenv("GUEST_JWT_SECRET", "").strip()),
+        },
+    )
 
     try:
         yield

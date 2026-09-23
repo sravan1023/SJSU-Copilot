@@ -9,9 +9,10 @@ router = APIRouter(tags=["jobs"])
 
 # Both endpoints drive write pipelines with the Supabase service role, so they
 # are gated on a grant in public.admin_grants rather than on being signed in.
-# Note this does NOT honour AUTH_OPTIONAL (see auth.auth_optional), and that
-# until 20260917000200 is pushed to a project, admin_grants does not exist there
-# and these fail closed with 503.
+# A guest is refused with 403: they are authenticated but can never hold a
+# grant, since grants are seeded by hand against an account. Note that until
+# 20260917000200 is pushed to a project, admin_grants does not exist there and
+# these fail closed with 503.
 RUN_JOBS = Depends(require_capability("run_jobs"))
 
 

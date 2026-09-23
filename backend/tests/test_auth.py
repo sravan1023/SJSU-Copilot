@@ -32,13 +32,17 @@ import runtime
 PROJECT = "https://test-project.supabase.co"
 ISSUER = f"{PROJECT}/auth/v1"
 HS_SECRET = "test-jwt-secret-not-a-real-one"
+GUEST_SECRET = "test-guest-secret-not-a-real-one"
 ALICE = "11111111-1111-1111-1111-111111111111"
 
 ENV = {
     "SUPABASE_URL": PROJECT,
     "SUPABASE_SERVICE_KEY": "test-service-key",
     "SUPABASE_JWT_AUD": "authenticated",
-    "AUTH_OPTIONAL": "false",
+    "GUEST_JWT_SECRET": GUEST_SECRET,
+    # Budgets have their own suite. Leaving them on here would turn the dozens
+    # of in-process requests below into unrelated 429s.
+    "RATE_LIMIT_ENABLED": "false",
     # main.py's load_dotenv() pulls the real key out of backend/.env. Most tests
     # here expect a 401 before the handler runs, so nothing should reach Groq --
     # but if a regression ever let one through, it must not bill the account.
@@ -110,6 +114,25 @@ def _es256(**overrides):
     )
 
 
+def _guest(secret=GUEST_SECRET, kid="guest-v1", alg="HS256", **overrides):
+    """A guest token, minted the way routers/guest.py does.
+
+    Written out here rather than imported from the router so a bug in the
+    minting endpoint cannot make these tests agree with it.
+    """
+    now = int(time.time())
+    claims = {
+        "sub": "guest:" + "a" * 32,
+        "aud": "guest",
+        "iss": "sjsu-copilot",
+        "exp": now + 3600,
+        "iat": now,
+    }
+    claims.update(overrides)
+    headers = {"kid": kid} if kid else {}
+    return jwt.encode(claims, secret, algorithm=alg, headers=headers)
+
+
 class _StubJWKS:
     """Stands in for jwt.PyJWKClient, serving the locally generated key."""
 
@@ -169,33 +192,37 @@ def test_no_header_is_401_with_a_challenge():
     assert res.headers["www-authenticate"] == "Bearer"
 
 
-def test_the_conftest_fixture_can_be_overridden():
-    """Guards the AUTH_OPTIONAL fixture in conftest.py.
+def test_the_session_credentials_can_be_overridden():
+    """Guards the session fixture in conftest.py.
 
-    That fixture sets AUTH_OPTIONAL=true for the whole session so the pre-auth
-    suites keep working. If this per-test override ever stopped taking effect,
-    every enforcement test above and below would pass for the wrong reason.
+    That fixture sets a signing secret and a token for the whole session so the
+    pre-auth suites keep working. If a per-test override ever stopped taking
+    effect, every enforcement test here would pass for the wrong reason --
+    which is the failure mode the old AUTH_OPTIONAL fixture actually had.
     """
-    assert os.getenv("AUTH_OPTIONAL") == "true", "the session fixture should be active here"
-    with patch.dict(os.environ, {"AUTH_OPTIONAL": "false"}):
-        assert auth.auth_optional() is False
-    assert auth.auth_optional() is True
+    from .conftest import GUEST_SECRET as SESSION_GUEST_SECRET
+
+    assert os.getenv("GUEST_JWT_SECRET") == SESSION_GUEST_SECRET
+    with patch.dict(os.environ, {"GUEST_JWT_SECRET": "something-else"}):
+        assert auth.guest_secret() == "something-else"
+    assert auth.guest_secret() == SESSION_GUEST_SECRET
 
 
-def test_auth_optional_forgives_a_missing_header_but_not_a_bad_token():
-    with patch("routers.chat.build_rag_prompt", _no_rag), \
-         patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}), \
-         respx.mock(assert_all_called=False) as mock:
-        from services import llm
+def test_a_missing_header_is_never_forgiven():
+    """There is no mode in which an unauthenticated request is served.
 
-        mock.post(llm.GROQ_API_URL).mock(return_value=_groq_ok())
-        assert _chat(env={"AUTH_OPTIONAL": "true"}).status_code == 200
+    AUTH_OPTIONAL used to provide one, for local development and the bench
+    harness. Both now mint a real guest token instead, and the flag is gone:
+    once a guest principal is a legitimate caller, a switch that admits an
+    unauthenticated one is an escalation rather than a convenience.
+    """
+    assert "AUTH_OPTIONAL" not in os.environ
+    assert not hasattr(auth, "auth_optional")
+    assert not hasattr(auth, "ANONYMOUS")
 
-    # A supplied token is still verified. A stale session gets a truthful 401
-    # rather than silently degrading to anonymous.
-    forged = jwt.encode(_claims(), "the-wrong-secret", algorithm="HS256")
-    res = _chat(token=forged, env={"AUTH_OPTIONAL": "true", "SUPABASE_JWT_SECRET": HS_SECRET})
-    assert res.status_code == 401
+    for env in ({}, {"AUTH_OPTIONAL": "true"}):
+        res = _chat(env=env)
+        assert res.status_code == 401, f"no header must be 401 even with {env}"
 
 
 # ── 2. Token verification ─────────────────────────────────────────────────────
@@ -406,14 +433,17 @@ def test_expired_grant_does_not_count():
     assert res.status_code == 403
 
 
-def test_capability_ignores_auth_optional():
-    """The flag exists for the chat path, not to reopen the job pipelines."""
+def test_capability_refuses_a_guest_with_403():
+    """A guest is authenticated, just not entitled -- and never can be.
+
+    Grants are seeded by hand against an account, so there is no user_id to
+    look one up against. Same 403 as require_user, for the same reason: 401
+    would tell a client holding a valid token to authenticate and retry.
+    """
     with respx.mock(assert_all_called=False) as mock:
         _grants_route(mock, [])
-        res = _request(
-            "POST", "/api/jobs/fetch", env={"AUTH_OPTIONAL": "true"}, json={}
-        )
-    assert res.status_code == 401
+        res = _request("POST", "/api/jobs/fetch", token=_guest(), json={})
+    assert res.status_code == 403
 
 
 def test_postgrest_failure_fails_closed_and_is_not_cached():
@@ -495,6 +525,137 @@ def test_active_grant_filtering():
     assert auth._active(rows) == frozenset({"never_expires", "still_valid"})
 
 
+# ── 4b. Guest sessions ────────────────────────────────────────────────────────
+
+
+def _mint():
+    """Drive POST /api/guest/session and return the response."""
+    return _request("POST", "/api/guest/session", json=None)
+
+
+def test_guest_session_mints_a_token_that_verifies():
+    """The round trip, which neither half proves alone."""
+    res = _mint()
+    assert res.status_code == 200
+    body = res.json()
+    assert body["expires_in"] == auth.GUEST_TTL_SECONDS
+    assert body["guest_id"] and "guest:" not in body["guest_id"]
+    # The credential must not be echoed into a log line anywhere; the endpoint
+    # logs the id only. Here we only care that the token verifies.
+    with patch("routers.chat.build_rag_prompt", _no_rag),          respx.mock(assert_all_called=False) as mock:
+        from services import llm
+
+        mock.post(llm.GROQ_API_URL).mock(return_value=_groq_ok())
+        assert _chat(token=body["token"]).status_code == 200
+
+
+def test_guest_session_is_unavailable_without_a_secret():
+    """Fails closed: minting a token no one could verify helps nobody."""
+    res = _request("POST", "/api/guest/session", env={"GUEST_JWT_SECRET": ""}, json=None)
+    assert res.status_code == 503
+
+
+def test_a_guest_may_use_the_chat_path():
+    with patch("routers.chat.build_rag_prompt", _no_rag),          respx.mock(assert_all_called=False) as mock:
+        from services import llm
+
+        mock.post(llm.GROQ_API_URL).mock(return_value=_groq_ok())
+        assert _chat(token=_guest()).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "path,body",
+    [
+        ("/api/generate-title", {"message": "hello"}),
+        ("/api/auto-behavior", CHAT_BODY),
+    ],
+)
+def test_a_guest_may_use_the_compute_helpers(path, body):
+    """Pure compute over what the caller supplied; no user-owned row involved.
+
+    A guest's conversation is ephemeral, but it still wants a title in the tab
+    and a sensible default tone, and neither endpoint touches a stored row.
+    """
+    with respx.mock(assert_all_called=False) as mock:
+        from services import llm
+
+        # generate-title posts stream: False and reads .json(); auto-behavior
+        # never reaches the provider at all.
+        mock.post(llm.GROQ_API_URL).mock(return_value=_groq_json())
+        assert _request("POST", path, token=_guest(), json=body).status_code == 200
+
+
+def test_a_guest_is_refused_an_account_only_endpoint_with_403():
+    """**The distinction this phase exists to make.**
+
+    401 would tell a client holding a valid, unexpired guest token to
+    authenticate and retry -- which re-presents the same token and fails
+    identically, forever. 403 is the true statement and the one the UI can act
+    on by offering a sign-in.
+    """
+    res = _request(
+        "POST", "/api/professors", token=_guest(), json={"message": "who teaches CS 151"}
+    )
+    assert res.status_code == 403
+    # Not a challenge: there is nothing to re-authenticate as.
+    assert "www-authenticate" not in res.headers
+
+
+def test_no_credentials_is_still_401_not_403():
+    """The other half of the same distinction, so neither collapses into it."""
+    res = _request("POST", "/api/professors", json={"message": "x"})
+    assert res.status_code == 401
+    assert res.headers["www-authenticate"] == "Bearer"
+
+
+@pytest.mark.parametrize(
+    "label,token_kwargs",
+    [
+        ("expired", {"exp": 1}),
+        ("wrong audience", {"aud": "authenticated"}),
+        ("wrong issuer", {"iss": ISSUER}),
+        ("forged signature", {"secret": "not-the-guest-secret"}),
+        ("subject outside the guest namespace", {"sub": ALICE}),
+        ("alg=none", {"alg": "none", "secret": ""}),
+    ],
+)
+def test_a_bad_guest_token_is_rejected(label, token_kwargs):
+    assert _chat(token=_guest(**token_kwargs)).status_code == 401, label
+
+
+def test_the_two_token_families_cannot_be_swapped():
+    """Disjoint on key, issuer and audience -- any one of the three is enough.
+
+    A Supabase session replayed as a guest, and a guest replayed as a session.
+    Neither can work, and neither should depend on the secret alone.
+    """
+    # A real user token carrying the guest routing hint: the kid sends it to
+    # the guest branch, where the key, issuer and audience all disagree.
+    user_with_guest_kid = jwt.encode(
+        _claims(), HS_SECRET, algorithm="HS256", headers={"kid": "guest-v1"}
+    )
+    assert _chat(token=user_with_guest_kid, env=_hs_env()).status_code == 401
+
+    # A guest token with the kid stripped falls into the Supabase HS256 branch,
+    # where its issuer and audience are wrong.
+    assert _chat(token=_guest(kid=None), env=_hs_env()).status_code == 401
+
+    # And a guest token signed with the *Supabase* secret still fails, because
+    # the guest branch verifies against GUEST_JWT_SECRET.
+    assert _chat(token=_guest(secret=HS_SECRET)).status_code == 401
+
+
+def test_a_session_may_not_claim_a_guest_subject():
+    """Closes the namespace: `sub` decides which principal the app sees."""
+    token = _hs256(sub="guest:" + "b" * 32)
+    assert _chat(token=token, env=_hs_env()).status_code == 401
+
+
+def test_the_guest_route_is_deliberately_open():
+    """Like /api/telemetry, and recorded here so it is a decision, not a gap."""
+    assert _mint().status_code == 200
+
+
 # ── 5. Observability ──────────────────────────────────────────────────────────
 
 
@@ -516,15 +677,20 @@ def test_startup_states_the_auth_posture():
             logging.getLogger("runtime").removeHandler(capture)
         return capture.records
 
-    warned = [
-        r for r in posture({"AUTH_OPTIONAL": "true"})
-        if r.levelno == logging.WARNING and "AUTH_OPTIONAL" in r.getMessage()
-    ]
-    assert len(warned) == 1, "AUTH_OPTIONAL must announce itself loudly"
-
     enforced = [r for r in posture({}) if r.getMessage() == "auth enforced"]
     assert len(enforced) == 1
     assert enforced[0].auth_optional is False
+
+    # guest_sessions is on the line because its failure mode is otherwise
+    # invisible: with no secret, POST /api/guest/session answers 503 and no
+    # visitor can use the app while every signed-in path keeps working.
+    assert enforced[0].guest_sessions is True
+
+    without = [
+        r for r in posture({"GUEST_JWT_SECRET": ""})
+        if r.getMessage() == "auth enforced"
+    ]
+    assert without[0].guest_sessions is False
 
 
 def test_the_timing_line_carries_the_principal():
@@ -551,8 +717,16 @@ def test_the_timing_line_carries_the_principal():
 # ── Shared stubs ──────────────────────────────────────────────────────────────
 
 
-async def _no_rag(messages):
+async def _no_rag(messages, audience=None):
     return "", []
+
+
+def _groq_json(content="A Short Title"):
+    """Non-streaming completion, as generate_title issues (stream: False)."""
+    return httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": content}}]},
+    )
 
 
 def _groq_ok():

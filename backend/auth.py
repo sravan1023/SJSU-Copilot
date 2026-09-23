@@ -2,8 +2,9 @@
 
 Two separate questions, deliberately kept apart:
 
-* **Who is this?** A Supabase access token, verified here. `get_principal`
-  returns a `Principal`; `require_user` rejects anonymous callers.
+* **Who is this?** A Supabase access token or a guest token, verified here.
+  `get_principal` returns a `Principal`; `require_principal` admits either,
+  `require_user` requires a real account and answers a guest with 403.
 * **What may they do?** Read from `public.admin_grants` via PostgREST with the
   service role. `require_capability(cap)` gates an endpoint on one grant.
 
@@ -59,38 +60,52 @@ _NON_USER_ROLES = {"anon", "service_role"}
 
 _ASYMMETRIC = ("ES256", "RS256")
 
+# ── Guest sessions ────────────────────────────────────────────────────────────
+#
+# A guest token is minted by POST /api/guest/session and signed with a secret
+# this backend owns. It is disjoint from a Supabase session on three axes at
+# once -- signing key, issuer and audience -- so neither can be replayed as the
+# other, and a failure of any one check is enough.
+#
+# Supabase native anonymous sign-in was considered and rejected: it creates a
+# real auth.users row per guest, which fires handle_new_user() (001:41-52) into
+# a NOT NULL profiles.email (001:15), and would then hand the guest full
+# own-row RLS access -- the opposite of ephemeral.
+GUEST_KID = "guest-v1"
+GUEST_ISSUER = "sjsu-copilot"
+GUEST_AUDIENCE = "guest"
+GUEST_SUB_PREFIX = "guest:"
+GUEST_TTL_SECONDS = 2 * 60 * 60
+
 
 @dataclass(frozen=True)
 class Principal:
     """The verified caller.
 
-    `kind` is "anonymous" only when AUTH_OPTIONAL is set and no header arrived.
-    Phase 2 adds "guest" here, alongside POST /api/guest/session; until those
-    tokens exist there is nothing for a guest field to hold.
+    Two kinds, and the difference is authority rather than how they were
+    checked. A guest holds a real, verified, unexpired token and is a
+    legitimate caller of the chat endpoints; they simply have no account, so
+    anything that writes a user-owned row is closed to them. That is a 403, not
+    a 401 -- see require_user.
     """
 
-    kind: Literal["user", "anonymous"]
+    kind: Literal["user", "guest"]
     user_id: str | None = None
+    guest_id: str | None = None
     email: str | None = None
     claims: dict = field(default_factory=dict)
 
+    @property
+    def rate_key(self) -> str:
+        """Stable per-caller key for rate limiting; cannot collide across kinds."""
+        if self.kind == "user":
+            return f"user:{self.user_id}"
+        return f"{GUEST_SUB_PREFIX}{self.guest_id}"
 
-ANONYMOUS = Principal(kind="anonymous")
 
-
-def auth_optional() -> bool:
-    """True when a request with no Authorization header is allowed through.
-
-    For local development and backend/bench/run_bench.py, which drives /api/chat
-    with no session. A token that IS supplied is still verified -- the flag
-    forgives a missing header, never a bad one.
-
-    It does not apply to require_capability: the flag exists for the chat path,
-    not to reopen the service-role job pipelines.
-
-    Delete this, and the conftest.py fixture that sets it, in Phase 2.
-    """
-    return os.getenv("AUTH_OPTIONAL", "false").strip().lower() in ("1", "true", "yes")
+def guest_secret() -> str:
+    """HMAC key for guest tokens. Empty means guest sessions are unavailable."""
+    return os.getenv("GUEST_JWT_SECRET", "").strip()
 
 
 def _supabase_url() -> str:
@@ -107,13 +122,49 @@ def _invalid(reason: str, **extra) -> HTTPException:
     return HTTPException(status_code=401, detail="invalid token", headers=_UNAUTHENTICATED)
 
 
-def _decode(token: str) -> dict:
-    """Verify a Supabase access token and return its claims.
+def _verify(token: str, *, key, algorithms, audience, issuer, options, alg) -> dict:
+    """jwt.decode with this project's error vocabulary.
 
-    The algorithm is read from the header and dispatched into two **disjoint**
-    branches. The token's own `alg` is never passed into `algorithms=`: that is
-    what makes algorithm confusion impossible, where an RS256/ES256 public key
-    is replayed as an HMAC secret.
+    `algorithms` is always a literal list supplied by the caller's branch, never
+    anything read off the token.
+    """
+    try:
+        return jwt.decode(
+            token,
+            key,
+            algorithms=algorithms,
+            audience=audience,
+            issuer=issuer,
+            options=options,
+        )
+    except jwt.ExpiredSignatureError as exc:
+        # The only distinguished 401. Expiry is not secret -- the client holds
+        # the token and can read `exp` -- and it is the one failure where the
+        # right client behaviour is refresh-and-retry rather than sign-out. For
+        # a guest, "retry" means minting a fresh session, which is why there is
+        # no guest refresh endpoint.
+        logger.info("token expired")
+        raise HTTPException(
+            status_code=401, detail="token expired", headers=_UNAUTHENTICATED
+        ) from exc
+    except jwt.PyJWTError as exc:
+        raise _invalid("verification failed", alg=alg, error=type(exc).__name__) from exc
+
+
+def _decode(token: str) -> dict:
+    """Verify an access token -- Supabase session or guest -- and return its claims.
+
+    The header is read unverified and used only to **route** into one of three
+    disjoint branches. The token's own `alg` is never passed into `algorithms=`:
+    every branch supplies a fixed literal list, which is what makes algorithm
+    confusion impossible, where an RS256/ES256 public key is replayed as an
+    HMAC secret.
+
+    Routing on an unverified `kid` is not a trust decision. It selects which
+    key to try; the signature, `aud`, `iss` and `exp` are then all verified
+    against that branch's own values, so a token that lies about its `kid`
+    simply fails. The JWKS branch already routes this way --
+    `get_signing_key_from_jwt` reads the unverified `kid` to pick a public key.
     """
     try:
         header = jwt.get_unverified_header(token)
@@ -121,12 +172,37 @@ def _decode(token: str) -> dict:
         raise _invalid("malformed header", error=type(exc).__name__) from exc
 
     alg = header.get("alg")
+    options = {"require": ["exp", "sub", "aud", "iss"]}
+
+    # Guest branch first, and self-contained: it needs no SUPABASE_URL, so a
+    # guest session keeps working if the Supabase config is absent.
+    if header.get("kid") == GUEST_KID:
+        # Asserted by name rather than relying on PyJWT's default, so a
+        # `kid=guest-v1, alg=none` token is refused for the stated reason.
+        if alg != "HS256":
+            raise _invalid("guest token must be HS256", alg=str(alg))
+        key = guest_secret()
+        if not key:
+            raise _invalid("guest token but GUEST_JWT_SECRET is not configured")
+        claims = _verify(
+            token,
+            key=key,
+            algorithms=["HS256"],
+            audience=GUEST_AUDIENCE,
+            issuer=GUEST_ISSUER,
+            options=options,
+            alg=alg,
+        )
+        sub = claims.get("sub")
+        if not isinstance(sub, str) or not sub.startswith(GUEST_SUB_PREFIX):
+            raise _invalid("guest token subject is not a guest id")
+        return claims
+
     url = _supabase_url()
     if not url:
         logger.error("SUPABASE_URL is not set; cannot verify tokens")
         raise HTTPException(status_code=503, detail="token verification unavailable")
 
-    options = {"require": ["exp", "sub", "aud", "iss"]}
     audience = os.getenv("SUPABASE_JWT_AUD", "authenticated")
     issuer = f"{url}/auth/v1"
 
@@ -164,25 +240,15 @@ def _decode(token: str) -> dict:
         # Includes "none".
         raise _invalid("unsupported algorithm", alg=str(alg))
 
-    try:
-        claims = jwt.decode(
-            token,
-            key,
-            algorithms=algorithms,
-            audience=audience,
-            issuer=issuer,
-            options=options,
-        )
-    except jwt.ExpiredSignatureError as exc:
-        # The only distinguished 401. Expiry is not secret -- the client holds
-        # the token and can read `exp` -- and it is the one failure where the
-        # right client behaviour is refresh-and-retry rather than sign-out.
-        logger.info("token expired")
-        raise HTTPException(
-            status_code=401, detail="token expired", headers=_UNAUTHENTICATED
-        ) from exc
-    except jwt.PyJWTError as exc:
-        raise _invalid("verification failed", alg=alg, error=type(exc).__name__) from exc
+    claims = _verify(
+        token,
+        key=key,
+        algorithms=algorithms,
+        audience=audience,
+        issuer=issuer,
+        options=options,
+        alg=alg,
+    )
 
     if claims.get("role") in _NON_USER_ROLES:
         raise _invalid("not a user session", role=claims.get("role"))
@@ -190,6 +256,12 @@ def _decode(token: str) -> dict:
     sub = claims.get("sub")
     if not isinstance(sub, str) or not sub:
         raise _invalid("no subject")
+
+    # A Supabase session whose subject looked like a guest id would be
+    # indistinguishable from one downstream. GoTrue issues uuids so this cannot
+    # happen today, but the failure would be silent and the check is one line.
+    if sub.startswith(GUEST_SUB_PREFIX):
+        raise _invalid("session subject collides with the guest namespace")
 
     if alg == "HS256":
         logger.warning("HS256 token accepted", extra={"sub": sub})
@@ -211,8 +283,6 @@ async def get_principal(
     started = time.perf_counter()
     try:
         if credentials is None or not (credentials.credentials or "").strip():
-            if auth_optional():
-                return ANONYMOUS
             logger.info("unauthenticated request", extra={"path": request.url.path})
             raise HTTPException(
                 status_code=401, detail="authentication required", headers=_UNAUTHENTICATED
@@ -221,6 +291,17 @@ async def get_principal(
         # Verification is CPU work plus, on a JWKS cache miss, a blocking HTTP
         # fetch. Both belong off the event loop.
         claims = await runtime.run_blocking(_decode, credentials.credentials)
+
+        # The kind comes from the **verified** issuer, never from the `kid`
+        # header that routed the decode. The routing hint must not be able to
+        # become the identity.
+        if claims.get("iss") == GUEST_ISSUER:
+            return Principal(
+                kind="guest",
+                guest_id=claims["sub"][len(GUEST_SUB_PREFIX):],
+                claims=claims,
+            )
+
         return Principal(
             kind="user",
             user_id=claims["sub"],
@@ -231,23 +312,31 @@ async def get_principal(
         request.state.auth_verify_ms = round((time.perf_counter() - started) * 1000, 1)
 
 
-def require_user(principal: Principal = Depends(get_principal)) -> Principal:
-    """Reject anonymous callers.
+def require_principal(principal: Principal = Depends(get_principal)) -> Principal:
+    """Any verified caller: a signed-in user or a guest.
 
-    Under AUTH_OPTIONAL an anonymous principal is let through: the flag's whole
-    purpose is to let the bench harness and local dev drive these endpoints with
-    no session, and get_principal only ever returns anonymous when the flag is
-    set. The caller still arrives as a Principal, and the chat route records
-    `principal: anonymous` on its timing line, so the log never pretends the
-    request was authenticated.
-
-    In Phase 2 a guest token is a legitimate /api/chat caller, so this becomes
-    the dependency for endpoints that need a real account rather than the
-    default for everything.
+    For endpoints a guest is meant to use -- the chat path and the two pure
+    compute helpers beside it. There is nothing extra to check here; arriving
+    with a Principal at all means the token verified.
     """
-    if principal.kind != "user" and not auth_optional():
+    return principal
+
+
+def require_user(principal: Principal = Depends(get_principal)) -> Principal:
+    """Require a real account. A guest gets 403, not 401.
+
+    This distinction is the whole point. 401 means "I do not know who you are;
+    authenticate and retry", and a client holding a valid guest token would do
+    exactly that -- re-presenting the same token, failing identically, forever.
+    403 means "I know who you are and this is not for you", which is the true
+    statement and the one the UI can act on by offering a sign-in.
+
+    Same three-way split require_capability already uses: 401 for no
+    credentials, 403 for credentials that are not enough, 503 for cannot tell.
+    """
+    if principal.kind != "user":
         raise HTTPException(
-            status_code=401, detail="authentication required", headers=_UNAUTHENTICATED
+            status_code=403, detail="this requires a signed-in account"
         )
     return principal
 
@@ -380,18 +469,16 @@ def require_capability(capability: str) -> Callable[..., Awaitable[Principal]]:
     a user-visible path, so the cost of failing closed is close to zero.
 
     503 rather than 403 so an outage is distinguishable from a missing grant.
-
-    Deliberately does not honour AUTH_OPTIONAL -- see auth_optional().
     """
 
     async def dependency(principal: Principal = Depends(get_principal)) -> Principal:
-        # Deliberately not Depends(require_user): that one lets an anonymous
-        # principal through under AUTH_OPTIONAL. There is no user_id to look a
-        # grant up against, and reopening these pipelines is the exact
-        # escalation this phase closes.
+        # A guest has no user_id to look a grant up against, and never will --
+        # grants are seeded by hand against an account. Same 403 as
+        # require_user, for the same reason: they are authenticated, just not
+        # entitled.
         if principal.kind != "user":
             raise HTTPException(
-                status_code=401, detail="authentication required", headers=_UNAUTHENTICATED
+                status_code=403, detail="this requires a signed-in account"
             )
         granted = await get_capabilities(principal.user_id)
         if capability not in granted:

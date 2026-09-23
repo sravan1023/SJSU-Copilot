@@ -10,7 +10,10 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 import observability
-from auth import Principal, require_user
+import audiences
+import ratelimit
+from auth import Principal
+from ratelimit import rate_limited
 from services.llm import stream_chat, generate_title
 from services.web_search import build_rag_prompt
 from services.conversation_state import (
@@ -62,6 +65,18 @@ class ChatRequest(BaseModel):
     model: str = Field(default="8b", max_length=64)
     behavior: dict | None = None
     memory_prompt: str | None = Field(default=None, max_length=MAX_MEMORY_PROMPT_CHARS)
+    # Which experience to render the answer for.
+    #
+    # **The server must not trust this for anything authorization-shaped.** It
+    # selects prompt text and which domains retrieval prefers, and nothing
+    # else -- a caller claiming to be faculty gets faculty-flavoured wording,
+    # not faculty-only information, because no information is gated on it.
+    # Authority comes from admin_grants and nowhere else.
+    #
+    # Unknown values fall back to the default rather than 422: audiences.get()
+    # is total, and rejecting a request because a client sent a stale audience
+    # id would break the chat over a cosmetic field.
+    audience: str | None = Field(default=None, max_length=32)
 
     _check_messages = field_validator("messages")(_check_total_chars)
 
@@ -91,14 +106,14 @@ def _request_id(request: Request) -> str:
     return supplied if _REQUEST_ID_RE.fullmatch(supplied) else uuid.uuid4().hex
 
 
-async def _retrieve_with_keepalive(messages: list[dict], request_id: str):
+async def _retrieve_with_keepalive(messages: list[dict], request_id: str, audience: str | None = None):
     """Run retrieval, emitting SSE comments while it works.
 
     Yields keepalive frames, then finally a ("result", (rag_prompt, sources))
     tuple. Retrieval is a task so a client disconnect can cancel it rather than
     leaving the search and crawl running.
     """
-    task = asyncio.create_task(build_rag_prompt(messages))
+    task = asyncio.create_task(build_rag_prompt(messages, audience))
     try:
         while True:
             done, _ = await asyncio.wait({task}, timeout=KEEPALIVE_SECONDS)
@@ -115,10 +130,24 @@ async def _retrieve_with_keepalive(messages: list[dict], request_id: str):
 async def chat(
     req: ChatRequest,
     request: Request,
-    principal: Principal = Depends(require_user),
+    principal: Principal = Depends(rate_limited),
 ):
     messages = [m.model_dump() for m in req.messages]
     request_id = _request_id(request)
+
+    # Normalised once, here, so every consumer below sees a value the config
+    # actually knows. audiences.get() is total -- an unrecognised id degrades
+    # to the default rather than raising -- which is what lets this be a plain
+    # optional string on the request instead of a validated enum that would
+    # 422 a client holding a stale id.
+    audience = audiences.get(req.audience)["id"]
+
+    # Claimed before the response object is built and released when the stream
+    # drains, not when this function returns -- see the finally below. A
+    # streaming turn occupies the provider for its whole duration, which is
+    # precisely the window the cap exists to bound.
+    if not ratelimit.acquire_slot(principal):
+        raise ratelimit.concurrency_error()
 
     async def event_stream():
         # Everything that used to happen before StreamingResponse was
@@ -133,6 +162,7 @@ async def chat(
         # before this generator and so before the trace ContextVar is set.
         observability.add_stage("auth_verify", getattr(request.state, "auth_verify_ms", 0.0))
         observability.record("principal", principal.kind)
+        observability.record("audience", audience)
         observability.record("history_messages", len(messages))
         outcome = "ok"
         try:
@@ -155,7 +185,7 @@ async def chat(
 
             rag_prompt, sources = None, []
             with observability.stage("rag.total"):
-                async for item in _retrieve_with_keepalive(messages, request_id):
+                async for item in _retrieve_with_keepalive(messages, request_id, audience):
                     if isinstance(item, tuple):
                         rag_prompt, sources = item[1]
                     else:
@@ -182,6 +212,7 @@ async def chat(
                 rag_prompt=rag_prompt,
                 sources=sources,
                 request_id=request_id,
+                audience=audience,
             ):
                 if frame.startswith('data: {"error"'):
                     outcome = "upstream_error"
@@ -204,6 +235,9 @@ async def chat(
             logger.exception("chat stream failed", extra={"request_id": request_id})
             yield _sse({"error": "Something went wrong generating this answer."})
         finally:
+            # The stream is over here and only here; releasing at handler
+            # return would under-count every streaming turn.
+            ratelimit.release_slot(principal)
             observability.flush(trace, outcome=outcome, model=req.model)
 
     return StreamingResponse(
@@ -220,7 +254,7 @@ async def chat(
 @router.post("/auto-behavior")
 async def auto_behavior(
     req: AutoBehaviorRequest,
-    principal: Principal = Depends(require_user),
+    principal: Principal = Depends(rate_limited),
 ):
     """Return what the backend auto-detected for this conversation."""
     messages = [m.model_dump() for m in req.messages]
@@ -233,6 +267,6 @@ async def auto_behavior(
 
 
 @router.post("/generate-title")
-async def title(req: TitleRequest, principal: Principal = Depends(require_user)):
+async def title(req: TitleRequest, principal: Principal = Depends(rate_limited)):
     result = await generate_title(req.message)
     return {"title": result}

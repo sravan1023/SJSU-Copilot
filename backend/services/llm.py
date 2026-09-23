@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 
+import audiences
 import observability
 import runtime
 
@@ -165,22 +166,59 @@ def _retry_after_seconds(headers: httpx.Headers) -> int | None:
     return max(1, math.ceil(seconds))
 
 
-QUERY_REWRITE_SYSTEM_PROMPT = (
-    "You rewrite student questions into a single concise web search query (5-15 words) "
-    "that finds authoritative pages on sjsu.edu and related SJSU resources. "
-    "Rules: add 'SJSU' if missing; expand acronyms in context "
-    "(CPT -> curricular practical training, OPT -> optional practical training, "
-    "F-1, I-20, FAFSA, GE, etc.); use SJSU office names where they help "
-    "(Global Office for international students, Registrar for registration/transcripts, "
-    "Cashier/Bursar for payments, Advising for course planning, Financial Aid). "
-    "Do NOT answer the question. Output ONLY the search query, no quotes, no preamble."
-)
+def build_query_rewrite_prompt(audience: str | None = None) -> str:
+    """System prompt for the search-query rewrite, scoped to who is asking.
 
-BASE_SYSTEM_PROMPT = (
-    "You are SJSU Copilot, a helpful AI assistant for San Jose State University students. "
-    "You help with questions about academics, campus life, degree requirements, registration, internships, and more. "
-    "If you don't know something specific to SJSU, say so honestly rather than making things up."
-)
+    The office names matter more than they look: they are the strongest signal
+    in the rewritten query, and the right office differs entirely by audience.
+    Sending an alum to the Registrar for a transcript is right; sending them to
+    Advising for course planning is not, because they are not enrolled.
+    """
+    offices = audiences.offices(audience)
+    office_hint = (
+        f"Use SJSU office names where they help ({'; '.join(offices)}). "
+        if offices
+        else ""
+    )
+    return (
+        "You rewrite questions into a single concise web search query (5-15 words) "
+        "that finds authoritative pages on sjsu.edu and related SJSU resources. "
+        "Rules: add 'SJSU' if missing; expand acronyms in context "
+        "(CPT -> curricular practical training, OPT -> optional practical training, "
+        "F-1, I-20, FAFSA, GE, etc.). "
+        + office_hint
+        + "Do NOT answer the question. Output ONLY the search query, no quotes, no preamble."
+    )
+
+
+def build_base_prompt(audience: str | None = None) -> str:
+    """The assistant's identity, with the audience's clause appended.
+
+    This is the **stable prefix** of the system prompt (policy_compiler puts
+    `base_identity` first, for prefix caching). Making it audience-dependent
+    means four prefixes rather than one, so cache hits fragment by audience.
+    That is expected and cheap: Phase 3's own note on prefix caching says
+    Groq's is automatic and not contractual, so nothing was budgeted against
+    it.
+
+    The core is neutral. It used to say "for San Jose State University
+    students", which quietly made every answer assume enrolment -- the thing
+    this phase exists to stop.
+    """
+    core = (
+        "You are SJSU Copilot, a helpful AI assistant for the San Jose State University community. "
+        "You help with questions about academics, campus life, degree requirements, registration, "
+        "internships, and more. "
+        "If you don't know something specific to SJSU, say so honestly rather than making things up."
+    )
+    clause = audiences.prompt_context(audience)
+    return f"{core} {clause}".strip() if clause else core
+
+
+# Kept as a module-level constant for callers that have no audience to pass
+# (tests, scripts). Equivalent to build_base_prompt(None), which is the
+# default audience.
+BASE_SYSTEM_PROMPT = build_base_prompt()
 
 
 def _get_api_key() -> str:
@@ -262,6 +300,7 @@ async def stream_chat(
     rag_prompt: str | None = None,
     sources: list[dict] | None = None,
     request_id: str | None = None,
+    audience: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Stream chat completion from Groq. Yields SSE-formatted lines:
@@ -276,7 +315,7 @@ async def stream_chat(
 
     # Fit the whole request -- policy, memory, retrieved context, history --
     # inside one token ceiling before sending it.
-    policy_prompt = compile_policy(BASE_SYSTEM_PROMPT, behavior)["prompt"]
+    policy_prompt = compile_policy(build_base_prompt(audience), behavior)["prompt"]
     fitted = fit_prompt(
         policy_prompt=policy_prompt,
         memory_prompt=memory_prompt,
@@ -424,7 +463,7 @@ async def stream_chat(
     yield f"data: {json.dumps(done_payload)}\n\n"
 
 
-async def rewrite_query_for_sjsu(question: str) -> str:
+async def rewrite_query_for_sjsu(question: str, audience: str | None = None) -> str:
     """Rewrite a user question into an SJSU-anchored web search query.
 
     Falls back to the original question on any failure (no key, timeout, parse error,
@@ -449,7 +488,7 @@ async def rewrite_query_for_sjsu(question: str) -> str:
                 json={
                     "model": MODEL_REWRITE,
                     "messages": [
-                        {"role": "system", "content": QUERY_REWRITE_SYSTEM_PROMPT},
+                        {"role": "system", "content": build_query_rewrite_prompt(audience)},
                         {"role": "user", "content": original},
                     ],
                     "stream": False,

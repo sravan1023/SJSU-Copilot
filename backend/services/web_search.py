@@ -13,6 +13,7 @@ import httpx
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 
+import audiences
 import observability
 import runtime
 from services.llm import rewrite_query_for_sjsu
@@ -184,22 +185,39 @@ def _dedup_results(results: list[dict]) -> list[dict]:
     return deduped
 
 
-def rank_sources(results: list[dict]) -> list[dict]:
+def rank_sources(results: list[dict], audience: str | None = None) -> list[dict]:
+    """Order search results, preferring this audience's own sources.
+
+    **Other universities are a penalty, not a filter.** They used to be dropped
+    outright, which is wrong for at least two real questions: "how does SJSU's
+    CS transfer credit compare to SFSU's" needs the other institution's page,
+    and a prospective student comparing campuses is a first-class guest
+    journey. A penalty still puts SJSU first whenever SJSU has an answer, and
+    only surfaces a neighbour when nothing else does.
+
+    Blocked domains stay a hard filter: a Reddit thread is not a source this
+    assistant should cite, at any rank.
+    """
     deduped = _dedup_results(results)
-    filtered = [
-        r for r in deduped
-        if r.get("url")
-        and not _is_blocked(r["url"])
-        and not _is_other_university(r["url"])
-    ]
+    filtered = [r for r in deduped if r.get("url") and not _is_blocked(r["url"])]
+
+    preferred = set(audiences.source_collections(audience))
 
     def score(item: dict) -> int:
         url = item.get("url") or ""
-        if _is_preferred(url):
-            return 100
-        if _is_edu(url):
-            return 5
-        return 0
+        host = _hostname(url)
+        points = 0
+        if any(_host_matches(host, domain) for domain in preferred):
+            points += 100
+        elif _is_preferred(url):
+            points += 80
+        elif _is_edu(url):
+            points += 5
+        if _is_other_university(url):
+            # Large enough to lose to any SJSU page and to a plain .edu, small
+            # enough that a relevant neighbour still beats nothing.
+            points -= 50
+        return points
 
     ranked = sorted(enumerate(filtered), key=lambda pair: (-score(pair[1]), pair[0]))
     return [item for _, item in ranked][:MAX_SOURCES]
@@ -543,7 +561,7 @@ def prepare_rag_query(messages: list[dict]) -> str | None:
     return last_user
 
 
-async def _search_within(rewritten: str, budget: float) -> list[dict]:
+async def _search_within(rewritten: str, budget: float, audience: str | None = None) -> list[dict]:
     """Run both searches concurrently, keeping whichever finished in time.
 
     DDGS is synchronous, so these run on the search pool. Note that abandoning
@@ -559,7 +577,11 @@ async def _search_within(rewritten: str, budget: float) -> list[dict]:
                 observability.add_stage(name, round((time.perf_counter() - started) * 1000, 1))
         return _done
 
-    sjsu = asyncio.ensure_future(runtime.run_search(search_web, f"{rewritten} site:sjsu.edu"))
+    # Scoped to this audience's own sources rather than always sjsu.edu:
+    # an alum's transcript question is better answered by the alumni site.
+    site = audiences.site_filter(audience)
+    scoped_query = f"{rewritten} {site}".strip() if site else rewritten
+    sjsu = asyncio.ensure_future(runtime.run_search(search_web, scoped_query))
     general = asyncio.ensure_future(runtime.run_search(search_web, rewritten))
     sjsu.add_done_callback(_timed("rag.search.sjsu"))
     general.add_done_callback(_timed("rag.search.general"))
@@ -583,7 +605,7 @@ async def _search_within(rewritten: str, budget: float) -> list[dict]:
     return results
 
 
-async def build_rag_prompt(messages: list[dict]) -> tuple[str | None, list[dict]]:
+async def build_rag_prompt(messages: list[dict], audience: str | None = None) -> tuple[str | None, list[dict]]:
     with observability.stage("rag.prepare"):
         question = prepare_rag_query(messages)
     observability.record("rag_skipped", 0 if question else 1)
@@ -597,7 +619,7 @@ async def build_rag_prompt(messages: list[dict]) -> tuple[str | None, list[dict]
     if needs_query_rewrite(question):
         observability.record("rewrite_skipped", 0)
         with observability.stage("rag.rewrite"):
-            rewritten = await rewrite_query_for_sjsu(question)
+            rewritten = await rewrite_query_for_sjsu(question, audience)
         logger.info(
             "RAG query rewritten",
             extra={
@@ -617,7 +639,7 @@ async def build_rag_prompt(messages: list[dict]) -> tuple[str | None, list[dict]
         return None, []
 
     try:
-        search_results = await _search_within(rewritten, remaining)
+        search_results = await _search_within(rewritten, remaining, audience)
     except Exception:
         logger.exception("search step failed", extra={"query_hash": _digest(rewritten)})
         return None, []
@@ -626,7 +648,7 @@ async def build_rag_prompt(messages: list[dict]) -> tuple[str | None, list[dict]
     if not search_results:
         return None, []
 
-    top_sources = rank_sources(search_results)
+    top_sources = rank_sources(search_results, audience)
     observability.record("sources_found", len(top_sources))
     if not top_sources:
         return None, []
