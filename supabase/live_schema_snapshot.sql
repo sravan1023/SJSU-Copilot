@@ -1735,92 +1735,80 @@ GRANT USAGE ON SCHEMA "public" TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."archive_stale_memories"("p_conversation_age_days" integer, "p_min_importance" integer) TO "anon";
-GRANT ALL ON FUNCTION "public"."archive_stale_memories"("p_conversation_age_days" integer, "p_min_importance" integer) TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."archive_stale_memories"("p_conversation_age_days" integer, "p_min_importance" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."archive_stale_memories"("p_conversation_age_days" integer, "p_min_importance" integer) TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."create_default_behavior_settings"() TO "anon";
-GRANT ALL ON FUNCTION "public"."create_default_behavior_settings"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."create_default_behavior_settings"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."create_default_behavior_settings"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."enforce_sjsu_email"() TO "anon";
-GRANT ALL ON FUNCTION "public"."enforce_sjsu_email"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."enforce_sjsu_email"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."enforce_sjsu_email"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."freeze_profile_privilege_columns"() TO "anon";
-GRANT ALL ON FUNCTION "public"."freeze_profile_privilege_columns"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."freeze_profile_privilege_columns"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."freeze_profile_privilege_columns"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."generate_job_dedupe_hash"("input_title" "text", "input_company" "text") TO "anon";
-GRANT ALL ON FUNCTION "public"."generate_job_dedupe_hash"("input_title" "text", "input_company" "text") TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."generate_job_dedupe_hash"("input_title" "text", "input_company" "text") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."generate_job_dedupe_hash"("input_title" "text", "input_company" "text") TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."get_memory_context"("p_user_id" "uuid", "p_conversation_id" "uuid", "p_project_id" "uuid", "p_max_global" integer, "p_max_project" integer, "p_max_conversation" integer) TO "anon";
-GRANT ALL ON FUNCTION "public"."get_memory_context"("p_user_id" "uuid", "p_conversation_id" "uuid", "p_project_id" "uuid", "p_max_global" integer, "p_max_project" integer, "p_max_conversation" integer) TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."get_memory_context"("p_user_id" "uuid", "p_conversation_id" "uuid", "p_project_id" "uuid", "p_max_global" integer, "p_max_project" integer, "p_max_conversation" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."get_memory_context"("p_user_id" "uuid", "p_conversation_id" "uuid", "p_project_id" "uuid", "p_max_global" integer, "p_max_project" integer, "p_max_conversation" integer) TO "service_role";
+GRANT ALL ON FUNCTION "public"."get_memory_context"("p_user_id" "uuid", "p_conversation_id" "uuid", "p_project_id" "uuid", "p_max_global" integer, "p_max_project" integer, "p_max_conversation" integer) TO "authenticated";
 
 
 
-GRANT ALL ON FUNCTION "public"."handle_new_user"() TO "anon";
-GRANT ALL ON FUNCTION "public"."handle_new_user"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."handle_new_user"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."handle_new_user"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."handle_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."handle_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."handle_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."handle_updated_at"() TO "service_role";
 
 
 
 REVOKE ALL ON FUNCTION "public"."has_grant"("p_capability" "text") FROM PUBLIC;
-GRANT ALL ON FUNCTION "public"."has_grant"("p_capability" "text") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."has_grant"("p_capability" "text") TO "service_role";
+GRANT ALL ON FUNCTION "public"."has_grant"("p_capability" "text") TO "authenticated";
 
 
 
-GRANT ALL ON FUNCTION "public"."match_documents"("query_embedding" "public"."vector", "match_count" integer, "match_threshold" double precision) TO "anon";
-GRANT ALL ON FUNCTION "public"."match_documents"("query_embedding" "public"."vector", "match_count" integer, "match_threshold" double precision) TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."match_documents"("query_embedding" "public"."vector", "match_count" integer, "match_threshold" double precision) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."match_documents"("query_embedding" "public"."vector", "match_count" integer, "match_threshold" double precision) TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."pipeline_state_set_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."pipeline_state_set_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."pipeline_state_set_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."pipeline_state_set_updated_at"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."promote_memory_to_project"("p_memory_id" "uuid", "p_project_id" "uuid") TO "anon";
-GRANT ALL ON FUNCTION "public"."promote_memory_to_project"("p_memory_id" "uuid", "p_project_id" "uuid") TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."promote_memory_to_project"("p_memory_id" "uuid", "p_project_id" "uuid") FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."promote_memory_to_project"("p_memory_id" "uuid", "p_project_id" "uuid") TO "service_role";
+GRANT ALL ON FUNCTION "public"."promote_memory_to_project"("p_memory_id" "uuid", "p_project_id" "uuid") TO "authenticated";
 
 
 
-GRANT ALL ON FUNCTION "public"."search_documents_fts"("query_text" "text", "match_count" integer) TO "anon";
-GRANT ALL ON FUNCTION "public"."search_documents_fts"("query_text" "text", "match_count" integer) TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."search_documents_fts"("query_text" "text", "match_count" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."search_documents_fts"("query_text" "text", "match_count" integer) TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."set_conversation_preview"() TO "anon";
-GRANT ALL ON FUNCTION "public"."set_conversation_preview"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."set_conversation_preview"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."set_conversation_preview"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "anon";
-GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "authenticated";
+REVOKE ALL ON FUNCTION "public"."set_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "service_role";
 
 
@@ -1840,92 +1828,92 @@ GRANT SELECT ON TABLE "public"."ats_registry" TO "authenticated";
 
 
 
-GRANT ALL ON TABLE "public"."behavior_feedback_log" TO "anon";
-GRANT ALL ON TABLE "public"."behavior_feedback_log" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."behavior_feedback_log" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."behavior_feedback_log" TO "authenticated";
 GRANT ALL ON TABLE "public"."behavior_feedback_log" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."behavior_settings" TO "anon";
-GRANT ALL ON TABLE "public"."behavior_settings" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."behavior_settings" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."behavior_settings" TO "authenticated";
 GRANT ALL ON TABLE "public"."behavior_settings" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."conversation_summaries" TO "anon";
-GRANT ALL ON TABLE "public"."conversation_summaries" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."conversation_summaries" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."conversation_summaries" TO "authenticated";
 GRANT ALL ON TABLE "public"."conversation_summaries" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."conversations" TO "anon";
-GRANT ALL ON TABLE "public"."conversations" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."conversations" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."conversations" TO "authenticated";
 GRANT ALL ON TABLE "public"."conversations" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."document_chunks" TO "anon";
-GRANT ALL ON TABLE "public"."document_chunks" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."document_chunks" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."document_chunks" TO "authenticated";
 GRANT ALL ON TABLE "public"."document_chunks" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."documents" TO "anon";
-GRANT ALL ON TABLE "public"."documents" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."documents" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."documents" TO "authenticated";
 GRANT ALL ON TABLE "public"."documents" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."job_fetch_runs" TO "anon";
-GRANT ALL ON TABLE "public"."job_fetch_runs" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."job_fetch_runs" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."job_fetch_runs" TO "authenticated";
 GRANT ALL ON TABLE "public"."job_fetch_runs" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."job_listings" TO "anon";
-GRANT ALL ON TABLE "public"."job_listings" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."job_listings" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."job_listings" TO "authenticated";
 GRANT ALL ON TABLE "public"."job_listings" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."job_sources" TO "anon";
-GRANT ALL ON TABLE "public"."job_sources" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."job_sources" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."job_sources" TO "authenticated";
 GRANT ALL ON TABLE "public"."job_sources" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."jobs_snapshot" TO "anon";
-GRANT ALL ON TABLE "public"."jobs_snapshot" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."jobs_snapshot" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."jobs_snapshot" TO "authenticated";
 GRANT ALL ON TABLE "public"."jobs_snapshot" TO "service_role";
 
 
 
-GRANT ALL ON SEQUENCE "public"."jobs_snapshot_id_seq" TO "anon";
-GRANT ALL ON SEQUENCE "public"."jobs_snapshot_id_seq" TO "authenticated";
+GRANT SELECT,USAGE ON SEQUENCE "public"."jobs_snapshot_id_seq" TO "anon";
+GRANT SELECT,USAGE ON SEQUENCE "public"."jobs_snapshot_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."jobs_snapshot_id_seq" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."memories" TO "anon";
-GRANT ALL ON TABLE "public"."memories" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."memories" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."memories" TO "authenticated";
 GRANT ALL ON TABLE "public"."memories" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."messages" TO "anon";
-GRANT ALL ON TABLE "public"."messages" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."messages" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."messages" TO "authenticated";
 GRANT ALL ON TABLE "public"."messages" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."pipeline_runs" TO "anon";
-GRANT ALL ON TABLE "public"."pipeline_runs" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."pipeline_runs" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."pipeline_runs" TO "authenticated";
 GRANT ALL ON TABLE "public"."pipeline_runs" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."pipeline_state" TO "anon";
-GRANT ALL ON TABLE "public"."pipeline_state" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."pipeline_state" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."pipeline_state" TO "authenticated";
 GRANT ALL ON TABLE "public"."pipeline_state" TO "service_role";
 
 
@@ -1935,8 +1923,8 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."profile_audience_details" T
 
 
 
-GRANT SELECT,REFERENCES,TRIGGER,TRUNCATE,MAINTAIN ON TABLE "public"."profiles" TO "anon";
-GRANT SELECT,REFERENCES,TRIGGER,TRUNCATE,MAINTAIN ON TABLE "public"."profiles" TO "authenticated";
+GRANT SELECT ON TABLE "public"."profiles" TO "anon";
+GRANT SELECT ON TABLE "public"."profiles" TO "authenticated";
 GRANT ALL ON TABLE "public"."profiles" TO "service_role";
 
 
@@ -1989,32 +1977,32 @@ GRANT UPDATE("onboarded_at") ON TABLE "public"."profiles" TO "authenticated";
 
 
 
-GRANT ALL ON TABLE "public"."project_summaries" TO "anon";
-GRANT ALL ON TABLE "public"."project_summaries" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."project_summaries" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."project_summaries" TO "authenticated";
 GRANT ALL ON TABLE "public"."project_summaries" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."projects" TO "anon";
-GRANT ALL ON TABLE "public"."projects" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."projects" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."projects" TO "authenticated";
 GRANT ALL ON TABLE "public"."projects" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."saved_conversations" TO "anon";
-GRANT ALL ON TABLE "public"."saved_conversations" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."saved_conversations" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."saved_conversations" TO "authenticated";
 GRANT ALL ON TABLE "public"."saved_conversations" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."student_academic_records" TO "anon";
-GRANT ALL ON TABLE "public"."student_academic_records" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."student_academic_records" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."student_academic_records" TO "authenticated";
 GRANT ALL ON TABLE "public"."student_academic_records" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."uploaded_documents" TO "anon";
-GRANT ALL ON TABLE "public"."uploaded_documents" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."uploaded_documents" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."uploaded_documents" TO "authenticated";
 GRANT ALL ON TABLE "public"."uploaded_documents" TO "service_role";
 
 
@@ -2036,21 +2024,21 @@ GRANT INSERT("source"),UPDATE("source") ON TABLE "public"."user_affiliations" TO
 
 
 
-GRANT ALL ON TABLE "public"."user_job_applications" TO "anon";
-GRANT ALL ON TABLE "public"."user_job_applications" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."user_job_applications" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."user_job_applications" TO "authenticated";
 GRANT ALL ON TABLE "public"."user_job_applications" TO "service_role";
 
 
 
-GRANT ALL ON TABLE "public"."user_saved_jobs" TO "anon";
-GRANT ALL ON TABLE "public"."user_saved_jobs" TO "authenticated";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."user_saved_jobs" TO "anon";
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."user_saved_jobs" TO "authenticated";
 GRANT ALL ON TABLE "public"."user_saved_jobs" TO "service_role";
 
 
 
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "postgres";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "anon";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT SELECT,USAGE ON SEQUENCES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT SELECT,USAGE ON SEQUENCES TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "service_role";
 
 
@@ -2059,8 +2047,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQ
 
 
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "postgres";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "anon";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "service_role";
 
 
@@ -2069,8 +2055,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUN
 
 
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "postgres";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
-ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT SELECT,INSERT,DELETE,UPDATE ON TABLES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT SELECT,INSERT,DELETE,UPDATE ON TABLES TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
 
 

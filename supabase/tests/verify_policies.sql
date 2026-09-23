@@ -522,3 +522,180 @@ BEGIN
   IF got = 'declared' THEN RAISE NOTICE '  ok   default status applied under a column grant (%)', got;
   ELSE RAISE NOTICE '  FAIL status came out as %', got; END IF;
 END $$;
+
+\echo ''
+\echo '=== 19. Privileges RLS cannot filter (20260918000100) ==='
+-- TRUNCATE is the one that matters: it ignores every policy on the table.
+select pg_temp.expect('alice truncates conversations',
+  $q$truncate table public.conversations$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('anon truncates profiles',
+  $q$truncate table public.profiles$q$,
+  true, 'anon');
+-- TRIGGER needs no CREATE on the schema, so it is its own escalation path.
+select pg_temp.expect('alice creates a trigger on profiles',
+  $q$create trigger t_evil before insert on public.profiles for each row execute function public.handle_updated_at()$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+
+DO $$
+DECLARE leftover text;
+BEGIN
+  -- No table in the schema may still hand these to anon or authenticated.
+  SELECT string_agg(DISTINCT table_name || ':' || grantee || ':' || privilege_type, ', ')
+    INTO leftover
+    FROM information_schema.table_privileges
+   WHERE table_schema = 'public'
+     AND grantee IN ('anon', 'authenticated')
+     AND privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN');
+  IF leftover IS NULL THEN
+    RAISE NOTICE '  ok   no table grants TRUNCATE/REFERENCES/TRIGGER/MAINTAIN to anon or authenticated';
+  ELSE
+    RAISE NOTICE '  FAIL still granted: %', leftover;
+  END IF;
+END $$;
+
+DO $$
+DECLARE n int;
+BEGIN
+  -- CRUD must be untouched, or an RLS policy somewhere has nothing to act on.
+  SELECT count(*) INTO n
+    FROM information_schema.table_privileges
+   WHERE table_schema = 'public' AND table_name = 'conversations'
+     AND grantee = 'authenticated'
+     AND privilege_type IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE');
+  IF n = 4 THEN RAISE NOTICE '  ok   CRUD on conversations is untouched (4 privileges)';
+  ELSE RAISE NOTICE '  FAIL conversations has % of 4 CRUD privileges for authenticated', n; END IF;
+END $$;
+
+\echo ''
+\echo '=== 20. Functions are deny-by-default, granted by name ==='
+select pg_temp.expect('anon executes archive_stale_memories',
+  $q$select public.archive_stale_memories(0, 2147483647)$q$,
+  true, 'anon');
+-- The one that would be a global wipe if it were ever made SECURITY DEFINER.
+-- It has no caller anywhere; service_role keeps it.
+select pg_temp.expect('alice executes archive_stale_memories',
+  $q$select public.archive_stale_memories(0, 2147483647)$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('anon executes get_memory_context',
+  $q$select public.get_memory_context('11111111-1111-1111-1111-111111111111'::uuid, null::uuid)$q$,
+  true, 'anon');
+select pg_temp.expect('anon executes match_documents',
+  $q$select public.match_documents(array_fill(0.0::real, array[1536])::public.vector, 1, 0.5)$q$,
+  true, 'anon');
+select pg_temp.expect('anon executes generate_job_dedupe_hash',
+  $q$select public.generate_job_dedupe_hash('t', 'c')$q$,
+  true, 'anon');
+
+-- Kept, because the memory edge function forwards the user's JWT and so runs
+-- as authenticated.
+select pg_temp.expect('alice executes get_memory_context',
+  $q$select public.get_memory_context('11111111-1111-1111-1111-111111111111'::uuid, null::uuid)$q$,
+  false, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('alice executes has_grant',
+  $q$select public.has_grant('run_jobs')$q$,
+  false, 'authenticated', '11111111-1111-1111-1111-111111111111');
+
+DO $$
+DECLARE leftover text;
+BEGIN
+  -- Extension-owned functions are excluded on purpose (deptype 'e'). pgvector
+  -- installs ~95 operator, type-I/O and index-support functions into public,
+  -- and operators check EXECUTE on the function behind them -- revoking those
+  -- would break the vector type for everyone. This asserts the application
+  -- surface only, which is what the migration revokes.
+  SELECT string_agg(DISTINCT p.proname, ', ') INTO leftover
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public'
+     AND has_function_privilege('anon', p.oid, 'EXECUTE')
+     AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e');
+  IF leftover IS NULL THEN RAISE NOTICE '  ok   anon can execute no application function in public';
+  ELSE RAISE NOTICE '  FAIL anon can still execute: %', leftover; END IF;
+END $$;
+
+DO $$
+DECLARE leftover text;
+BEGIN
+  -- Same for authenticated, minus the three granted back by name.
+  SELECT string_agg(DISTINCT p.proname, ', ') INTO leftover
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public'
+     AND has_function_privilege('authenticated', p.oid, 'EXECUTE')
+     AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
+     AND p.proname NOT IN ('has_grant', 'get_memory_context', 'promote_memory_to_project');
+  IF leftover IS NULL THEN
+    RAISE NOTICE '  ok   authenticated executes only the three functions granted by name';
+  ELSE RAISE NOTICE '  FAIL authenticated can also execute: %', leftover; END IF;
+END $$;
+
+\echo ''
+\echo '=== 21. Revoking EXECUTE did not stop triggers firing ==='
+-- EXECUTE is checked when a trigger is created, not each time it fires. That is
+-- the assumption section 2 of the migration rests on, so measure it: every one
+-- of these runs a trigger function that anon and authenticated can no longer
+-- call directly.
+DO $$
+DECLARE before_ts timestamptz; after_ts timestamptz; preview text;
+BEGIN
+  SELECT updated_at INTO before_ts FROM public.profiles WHERE id = '11111111-1111-1111-1111-111111111111';
+  PERFORM pg_sleep(0.01);
+  PERFORM set_config('role', 'authenticated', true);
+  PERFORM set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  UPDATE public.profiles SET full_name = 'Alice C' WHERE id = '11111111-1111-1111-1111-111111111111';
+  INSERT INTO public.messages(conversation_id, role, content)
+    VALUES ((SELECT id FROM public.conversations WHERE user_id = '11111111-1111-1111-1111-111111111111' LIMIT 1),
+            'user', 'does the preview trigger still fire after the revoke?');
+  PERFORM set_config('role', 'postgres', true);
+
+  SELECT updated_at INTO after_ts FROM public.profiles WHERE id = '11111111-1111-1111-1111-111111111111';
+  IF after_ts > before_ts THEN RAISE NOTICE '  ok   handle_updated_at still fires (EXECUTE revoked)';
+  ELSE RAISE NOTICE '  FAIL handle_updated_at stopped firing after the revoke'; END IF;
+
+  SELECT last_message_preview INTO preview FROM public.conversations
+   WHERE user_id = '11111111-1111-1111-1111-111111111111' LIMIT 1;
+  IF preview LIKE 'does the preview trigger%' THEN
+    RAISE NOTICE '  ok   set_conversation_preview still fires (EXECUTE revoked)';
+  ELSE RAISE NOTICE '  FAIL preview trigger stopped firing: %', preview; END IF;
+END $$;
+
+-- The signup chain (handle_new_user -> create_default_behavior_settings) is the
+-- highest-consequence trigger path of all: if the revoke broke it, no account
+-- could be created.
+DO $$
+DECLARE uid uuid := '55555555-5555-5555-5555-555555555555';
+BEGIN
+  INSERT INTO auth.users (id, email, raw_user_meta_data)
+    VALUES (uid, 'trigger-probe@sjsu.edu', '{"full_name":"Trigger Probe"}'::jsonb);
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = uid)
+     AND EXISTS (SELECT 1 FROM public.behavior_settings WHERE user_id = uid) THEN
+    RAISE NOTICE '  ok   signup chain still fires (EXECUTE revoked)';
+  ELSE
+    RAISE NOTICE '  FAIL signup chain broke after the revoke';
+  END IF;
+EXCEPTION WHEN others THEN
+  RAISE NOTICE '  FAIL signup raised after the revoke: %', substr(sqlerrm, 1, 65);
+END $$;
+
+-- generate_job_dedupe_hash backs a GENERATED ALWAYS AS ... STORED column on
+-- job_listings, so an insert evaluates it. Revoking EXECUTE from anon and
+-- authenticated must not stop the service role writing there -- that is the
+-- whole job pipeline.
+DO $$
+BEGIN
+  PERFORM set_config('role', 'service_role', true);
+  INSERT INTO public.job_listings(title, company, apply_url)
+    VALUES ('Dedupe probe', 'Acme', 'https://example.invalid/job');
+  PERFORM set_config('role', 'postgres', true);
+  IF EXISTS (SELECT 1 FROM public.job_listings
+              WHERE title = 'Dedupe probe' AND dedupe_hash IS NOT NULL) THEN
+    RAISE NOTICE '  ok   service_role still inserts job_listings (generated column evaluated)';
+  ELSE
+    RAISE NOTICE '  FAIL generated dedupe_hash was not produced';
+  END IF;
+EXCEPTION WHEN others THEN
+  PERFORM set_config('role', 'postgres', true);
+  RAISE NOTICE '  FAIL service_role insert into job_listings broke: %', substr(sqlerrm, 1, 65);
+END $$;
