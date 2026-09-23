@@ -1,0 +1,152 @@
+{
+  "$comment": [
+    "Single source of truth for the four audiences. Imported by",
+    "UI/src/config/audiences.ts (Vite handles JSON natively) and read by",
+    "backend/audiences.py, so the prompt half and the UI half cannot drift.",
+    "",
+    "The four ids are exactly the values the database check constraints allow",
+    "on profiles.active_audience, profile_audience_details.audience and",
+    "conversations.audience (supabase/migrations/20260917000100_audience_model.sql).",
+    "backend/tests/test_audiences.py asserts that, so adding a fifth id here",
+    "fails the suite instead of failing in the browser as 'save failed'.",
+    "",
+    "affiliation_kind is a SIX-value enum and is a different concept: what a",
+    "person claims to be, not which experience they get. affiliations[] below",
+    "maps the two. 'staff' folds into faculty; 'applicant' and 'community' fold",
+    "into guest; guest itself declares no affiliation at all."
+  ],
+
+  "default": "student",
+
+  "audiences": {
+    "student": {
+      "id": "student",
+      "label": "Student",
+      "blurb": "Currently enrolled at SJSU",
+      "welcomeHeadline": "What do you need help with today?",
+      "affiliations": ["student"],
+      "declaresAffiliation": "student",
+      "sourceCollections": ["sjsu.edu"],
+      "offices": [
+        "Registrar for registration, enrollment and transcripts",
+        "Global Office for international student questions (F-1, I-20, CPT, OPT)",
+        "Financial Aid and the Bursar for money",
+        "Advising for course planning and degree requirements"
+      ],
+      "promptContext": "You are helping a currently enrolled SJSU student. Assume they have a MySJSU account and can reach student services directly.",
+      "suggestions": [
+        { "title": "Degree Requirements", "subtitle": "What classes do I need to graduate?", "prompt": "What classes do I need to graduate?" },
+        { "title": "Registration Dates", "subtitle": "When is the deadline for Spring 2026?", "prompt": "When is the registration deadline for Spring 2026?" },
+        { "title": "Professor Office Hours", "subtitle": "Where can I find my professors?", "prompt": "Where can I find my professors' office hours?" },
+        { "title": "Financial Aid", "subtitle": "When does my FAFSA need to be in?", "prompt": "When is the FAFSA deadline and how do I check my aid status?" },
+        { "title": "Internship Opportunities", "subtitle": "Show me roles for Software Engineering", "prompt": "Show me internship roles for Software Engineering" },
+        { "title": "Library Resources", "subtitle": "How do I book a private study room?", "prompt": "How do I book a private study room at the library?" }
+      ],
+      "profileFields": [
+        { "name": "university_id", "label": "SJSU ID", "type": "text", "icon": "Hash", "placeholder": "009123456", "maxLength": 9, "column": "university_id" },
+        { "name": "major", "label": "Major", "type": "text", "icon": "BookOpen", "placeholder": "Computer Science", "column": "major" },
+        { "name": "minor", "label": "Minor", "type": "text", "icon": "BookOpen", "placeholder": "Mathematics", "column": "minor" },
+        { "name": "class_standing", "label": "Class Standing", "type": "select", "options": ["Freshman", "Sophomore", "Junior", "Senior", "Graduate"], "column": "class_standing" },
+        { "name": "graduation_year", "label": "Expected Graduation", "type": "month", "icon": "Calendar", "span": 2, "column": "graduation_year" },
+        { "name": "gpa", "label": "GPA", "type": "number", "min": 0, "max": 4, "step": 0.01, "placeholder": "3.50", "column": "gpa" }
+      ]
+    },
+
+    "alumni": {
+      "id": "alumni",
+      "label": "Alum",
+      "blurb": "Graduated from SJSU",
+      "welcomeHeadline": "Welcome back. What can I help you find?",
+      "affiliations": ["alumni"],
+      "declaresAffiliation": "alumni",
+      "sourceCollections": ["sjsu.edu", "sjsualumni.org"],
+      "offices": [
+        "the Alumni Association for membership, events and benefits",
+        "the Registrar for transcripts and degree verification",
+        "the Career Center for alumni career services",
+        "the Library for alumni borrowing and database access"
+      ],
+      "promptContext": "You are helping an SJSU alum. They have graduated, so they no longer have a student account or enrollment; route them to alumni services rather than to current-student systems.",
+      "suggestions": [
+        { "title": "Request a Transcript", "subtitle": "How do I order an official copy?", "prompt": "How do I order an official transcript as an alum?" },
+        { "title": "Alumni Benefits", "subtitle": "What do I get as a graduate?", "prompt": "What benefits does the SJSU Alumni Association offer?" },
+        { "title": "Career Services", "subtitle": "Can I still use the Career Center?", "prompt": "Can alumni still use the SJSU Career Center?" },
+        { "title": "Library Access", "subtitle": "Do I keep borrowing privileges?", "prompt": "What library access do SJSU alumni have?" },
+        { "title": "Events & Reunions", "subtitle": "What's happening on campus?", "prompt": "What alumni events are coming up at SJSU?" },
+        { "title": "Degree Verification", "subtitle": "An employer is asking", "prompt": "How does an employer verify my SJSU degree?" }
+      ],
+      "profileFields": [
+        { "name": "graduation_year", "label": "Graduation Year", "type": "month", "icon": "Calendar", "column": "graduation_year" },
+        { "name": "degree", "label": "Degree", "type": "text", "icon": "GraduationCap", "placeholder": "B.S. Computer Science" },
+        { "name": "major", "label": "Major", "type": "text", "icon": "BookOpen", "placeholder": "Computer Science", "column": "major" },
+        { "name": "employer", "label": "Current Employer", "type": "text", "icon": "Hash", "placeholder": "Optional" },
+        { "name": "industry", "label": "Industry", "type": "text", "icon": "Hash", "placeholder": "Optional", "span": 2 }
+      ]
+    },
+
+    "faculty": {
+      "id": "faculty",
+      "label": "Faculty & Staff",
+      "blurb": "Teaching or working at SJSU",
+      "welcomeHeadline": "What can I help you with?",
+      "affiliations": ["faculty", "staff"],
+      "declaresAffiliation": "faculty",
+      "sourceCollections": ["sjsu.edu"],
+      "offices": [
+        "Faculty Affairs for appointments, RTP and policy",
+        "Academic Scheduling and the Registrar for the academic calendar and curriculum deadlines",
+        "the Research Foundation for grants and sponsored programs",
+        "IT Services for classroom technology and Canvas"
+      ],
+      "promptContext": "You are helping an SJSU faculty or staff member. They work here; answer from the employee side (policy, curriculum, administration) rather than the student side, and do not explain things to them as though they were a student.",
+      "suggestions": [
+        { "title": "Academic Calendar", "subtitle": "When are grades due?", "prompt": "When are final grades due this semester?" },
+        { "title": "Curriculum Deadlines", "subtitle": "Course proposal timelines", "prompt": "What are the deadlines for submitting a new course proposal?" },
+        { "title": "Research Administration", "subtitle": "How do I submit a grant?", "prompt": "How do I route a grant proposal through the SJSU Research Foundation?" },
+        { "title": "Classroom Technology", "subtitle": "Getting support for a room", "prompt": "How do I request classroom technology support?" },
+        { "title": "HR & Benefits", "subtitle": "Where do I find my options?", "prompt": "Where do SJSU employees find benefits and HR information?" },
+        { "title": "Canvas & Teaching Tools", "subtitle": "Setting up a course site", "prompt": "How do I set up my Canvas course site at SJSU?" }
+      ],
+      "profileFields": [
+        { "name": "department", "label": "Department", "type": "text", "icon": "BookOpen", "placeholder": "Computer Science" },
+        { "name": "title", "label": "Title", "type": "text", "icon": "GraduationCap", "placeholder": "Associate Professor" },
+        { "name": "research_area", "label": "Research Area", "type": "text", "icon": "BookOpen", "placeholder": "Optional", "span": 2 }
+      ]
+    },
+
+    "guest": {
+      "id": "guest",
+      "label": "Visitor",
+      "blurb": "Exploring SJSU, visiting, or applying",
+      "welcomeHeadline": "Ask anything about San Jose State",
+      "affiliations": ["applicant", "community"],
+      "declaresAffiliation": null,
+      "sourceCollections": ["sjsu.edu"],
+      "offices": [
+        "Admissions for applying, deadlines and requirements",
+        "Parking Services and Visitor Services for getting to and around campus",
+        "the Welcome Center for tours",
+        "Housing for on-campus living questions"
+      ],
+      "promptContext": "You are helping a visitor, prospective student or member of the public. They do not have an SJSU account, so never tell them to log in to MySJSU or another internal system; answer from publicly available information and point them at a public page or a phone number.",
+      "suggestions": [
+        { "title": "Applying to SJSU", "subtitle": "What are the deadlines?", "prompt": "What are the application deadlines for SJSU?" },
+        { "title": "Visiting Campus", "subtitle": "Can I take a tour?", "prompt": "How do I book a campus tour at SJSU?" },
+        { "title": "Parking", "subtitle": "Where do visitors park?", "prompt": "Where can visitors park at SJSU and what does it cost?" },
+        { "title": "Admission Requirements", "subtitle": "What do I need to get in?", "prompt": "What are the admission requirements for SJSU?" },
+        { "title": "Cost & Financial Aid", "subtitle": "What does a year cost?", "prompt": "What does it cost to attend SJSU for a year?" },
+        { "title": "Campus Events", "subtitle": "What's open to the public?", "prompt": "What SJSU events are open to the public?" }
+      ],
+      "profileFields": []
+    }
+  },
+
+  "affiliationToAudience": {
+    "student": "student",
+    "alumni": "alumni",
+    "faculty": "faculty",
+    "staff": "faculty",
+    "applicant": "guest",
+    "community": "guest"
+  }
+}
