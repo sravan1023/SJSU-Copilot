@@ -145,6 +145,7 @@ const statusLabelFor = (key) => STATUS_LABELS[key] || 'Thinking';
 
 // ── Main component ───────────────────────────────────────────
 export default function MainChat({
+  audience,
   messages,
   input,
   setInput,
@@ -288,18 +289,27 @@ export default function MainChat({
       >
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center">
-            <div className="relative text-center mb-12">
+            <div className="relative text-center mb-10">
               <h1 className="text-7xl font-display font-bold text-text-primary/10 select-none pointer-events-none tracking-tighter leading-none transition-colors duration-300">
                 SJSU <br /> COPILOT
               </h1>
+              {/* The wordmark above is decorative. This is the line that
+                  actually addresses the person, and it differs per audience --
+                  an alum and a visitor are not asking the same kinds of
+                  question. */}
+              {audience?.welcomeHeadline && (
+                <p className="mt-4 text-lg text-text-secondary">{audience.welcomeHeadline}</p>
+              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-3xl">
-              <SuggestionCard title="Degree Requirements" subtitle="What classes do I need to graduate?" onClick={() => handleSuggestionClick('What classes do I need to graduate?')} />
-              <SuggestionCard title="Registration Dates" subtitle="When is the deadline for Spring 2026?" onClick={() => handleSuggestionClick('When is the deadline for Spring 2026?')} />
-              <SuggestionCard title="Professor Office Hours" subtitle="Where can I find my professors?" onClick={() => handleSuggestionClick('Where can I find my professors?')} />
-              <SuggestionCard title="Campus Dining" subtitle="What are the best places to eat near the SU?" onClick={() => handleSuggestionClick('What are the best places to eat near the SU?')} />
-              <SuggestionCard title="Internship Opportunities" subtitle="Show me roles for Software Engineering" onClick={() => handleSuggestionClick('Show me roles for Software Engineering')} />
-              <SuggestionCard title="Library Resources" subtitle="How do I book a private study room?" onClick={() => handleSuggestionClick('How do I book a private study room?')} />
+              {(audience?.suggestions || []).map((card) => (
+                <SuggestionCard
+                  key={card.title}
+                  title={card.title}
+                  subtitle={card.subtitle}
+                  onClick={() => handleSuggestionClick(card.prompt)}
+                />
+              ))}
             </div>
           </div>
         ) : (

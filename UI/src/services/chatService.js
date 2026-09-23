@@ -9,7 +9,7 @@ import { supabase } from '../supabaseClient';
 export async function fetchConversations({ limit = 20, cursor = null } = {}) {
   let query = supabase
     .from('conversations')
-    .select('id, title, last_message_preview, updated_at, project_id')
+    .select('id, title, last_message_preview, updated_at, project_id, audience')
     .is('project_id', null)
     .order('updated_at', { ascending: false })
     .limit(limit);
@@ -27,9 +27,12 @@ export async function fetchConversations({ limit = 20, cursor = null } = {}) {
  * Create a new conversation. Title can be null (auto-generated later).
  * Pass projectId to create inside a project.
  */
-export async function createConversation(userId, title = null, projectId = null) {
+export async function createConversation(userId, title = null, projectId = null, audience = null) {
   const row = { user_id: userId, title };
   if (projectId) row.project_id = projectId;
+  // A snapshot of which experience produced this thread, so a conversation
+  // started as an alum still reads as one after the person switches audience.
+  if (audience) row.audience = audience;
   const { data, error } = await supabase
     .from('conversations')
     .insert(row)

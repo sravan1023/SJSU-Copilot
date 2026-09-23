@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
-export default function Login({ onLogin, onSwitchToSignup, authError = '' }) {
+export default function Login({ onLogin, onSwitchToSignup, onContinueAsGuest, authError = '' }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [guestLoading, setGuestLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -41,6 +42,22 @@ export default function Login({ onLogin, onSwitchToSignup, authError = '' }) {
       setError(submitError?.message || 'Login failed.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGuest = async () => {
+    if (!onContinueAsGuest) return;
+    setError('');
+    setGuestLoading(true);
+    try {
+      await onContinueAsGuest();
+    } catch (guestError) {
+      // startGuestSession throws with a message written for a person: an
+      // unreachable backend, a server with no signing key, or too many
+      // sessions from this address all read differently.
+      setError(guestError?.message || 'Could not continue as a guest.');
+    } finally {
+      setGuestLoading(false);
     }
   };
 
@@ -158,6 +175,23 @@ export default function Login({ onLogin, onSwitchToSignup, authError = '' }) {
             </svg>
             Sign in with Google
           </button>
+
+          {/* Continue as guest */}
+          {onContinueAsGuest && (
+            <button
+              type="button"
+              onClick={handleGuest}
+              disabled={guestLoading}
+              className="w-full mt-3 flex items-center justify-center gap-3 bg-transparent hover:bg-[#0F172A] disabled:opacity-50 disabled:cursor-not-allowed border border-[#334155] text-[#94A3B8] hover:text-white font-medium py-3 rounded-lg transition-colors"
+            >
+              {guestLoading ? 'Starting...' : 'Continue as guest'}
+            </button>
+          )}
+          {onContinueAsGuest && (
+            <p className="text-center text-[#64748B] text-xs mt-2">
+              No account needed. Nothing is saved, and refreshing ends the session.
+            </p>
+          )}
 
           {/* Switch to Signup */}
           <p className="text-center text-[#94A3B8] text-sm mt-6">

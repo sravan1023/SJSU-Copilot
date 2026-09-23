@@ -60,7 +60,7 @@ export async function deleteProject(projectId) {
 export async function fetchProjectConversations(projectId) {
   const { data, error } = await supabase
     .from('conversations')
-    .select('id, title, last_message_preview, updated_at, project_id')
+    .select('id, title, last_message_preview, updated_at, project_id, audience')
     .eq('project_id', projectId)
     .order('updated_at', { ascending: false });
   if (error) throw error;

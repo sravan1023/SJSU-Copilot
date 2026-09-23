@@ -5,8 +5,87 @@ import MemoryManagement from './MemoryManagement';
 import BehaviorSettings from './BehaviorSettings';
 import PrioritySettings from './PrioritySettings';
 import { DEFAULT_BEHAVIOR } from '../services/behaviorService';
+import {
+  updateProfile,
+  saveAudienceDetails,
+  fetchAudienceDetails,
+} from '../services/profileService';
 
-export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBehavior, autoBehavior }) {
+/**
+ * Fields whose stored shape differs from their input shape.
+ *
+ * Kept here rather than in audiences.json because this is a property of the
+ * form's input types, not of the audience: `graduation_year` is an integer
+ * column shown by a <input type="month">, and `gpa` is numeric shown by a text
+ * input. Everything else round-trips as a string.
+ */
+const CONVERTERS = {
+  graduation_year: {
+    fromDb: (v) => (v ? `${v}-05` : ''),
+    toDb: (v) => (v ? parseInt(String(v).split('-')[0], 10) : null),
+  },
+  gpa: {
+    fromDb: (v) => (v ?? ''),
+    toDb: (v) => (v === '' || v == null ? null : parseFloat(v)),
+  },
+};
+
+const ICONS = { Hash, Phone, Mail, BookOpen, GraduationCap, Calendar, User2Icon };
+
+/**
+ * One field of the audience-driven section.
+ *
+ * Two shapes, which is all the original hand-written form used: plain, and
+ * icon-prefixed with the icon absolutely positioned inside a relative wrapper.
+ */
+function Field({ field, value, onChange, inputClass, labelClass }) {
+  const Icon = field.icon ? ICONS[field.icon] : null;
+  const common = {
+    name: field.name,
+    value: value ?? '',
+    onChange: (e) => onChange(field.name, e.target.value),
+    placeholder: field.placeholder || '',
+  };
+
+  let control;
+  if (field.type === 'select') {
+    control = (
+      <select {...common} className={inputClass}>
+        <option value="">Select...</option>
+        {(field.options || []).map((option) => (
+          <option key={option} value={option}>{option}</option>
+        ))}
+      </select>
+    );
+  } else {
+    const input = (
+      <input
+        {...common}
+        type={field.type === 'number' ? 'number' : field.type}
+        className={Icon ? `${inputClass} pl-10` : inputClass}
+        maxLength={field.maxLength}
+        min={field.min}
+        max={field.max}
+        step={field.step}
+      />
+    );
+    control = Icon ? (
+      <div className="relative">
+        <Icon size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+        {input}
+      </div>
+    ) : input;
+  }
+
+  return (
+    <div className={field.span === 2 ? 'md:col-span-2' : ''}>
+      <label className={labelClass}>{field.label}</label>
+      {control}
+    </div>
+  );
+}
+
+export default function UserProfile({ onBack, user, audience, onProfileChange, behaviorSettings, onUpdateBehavior, autoBehavior }) {
   // At the global-profile scope there is no live conversation to auto-adapt to,
   // so the "auto" baseline falls back to DEFAULT_BEHAVIOR. Manual overrides
   // (behaviorSettings) are merged on top for display.
@@ -16,52 +95,68 @@ export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBe
     () => ({ ...autoBaseline, ...manualOverrides }),
     [autoBaseline, manualOverrides]
   );
+  // Universal identity fields, the same for every audience.
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
-    sjsuId: '',
     email: '',
     phone: '',
-    major: '',
-    minor: '',
-    expectedGraduation: '',
-    year: 'Freshman',
-    gpa: '',
   });
 
+  // The audience-driven section. Keyed by field name; a field with a `column`
+  // lands in `profiles`, one without lands in profile_audience_details.details.
+  const [audienceData, setAudienceData] = useState({});
+
+  const fields = useMemo(() => audience?.profileFields ?? [], [audience]);
+
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [_loadingProfile, setLoadingProfile] = useState(true);
   const [activeTab, setActiveTab] = useState('profile'); // 'profile' | 'personalization'
   const [personalSection, setPersonalSection] = useState('style'); // 'style' | 'priorities' | 'memory'
 
   // Load profile from Supabase on mount
   useEffect(() => {
+    let alive = true;
     async function fetchProfile() {
       if (!user?.id) { setLoadingProfile(false); return; }
+
       const { data } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
         .single();
+
+      // Fields with no `profiles` column live in a jsonb blob keyed by
+      // audience, so an alum's employer and a faculty member's department do
+      // not become two more mostly-null columns on a shared table.
+      const details = await fetchAudienceDetails(user.id, audience?.id || 'student')
+        .catch(() => ({}));
+
+      if (!alive) return;
+
       if (data) {
         const nameParts = (data.full_name || '').split(' ');
         setFormData({
           firstName: nameParts[0] || '',
           lastName: nameParts.slice(1).join(' ') || '',
-          sjsuId: data.university_id || '',
           email: data.email || '',
           phone: data.phone || '',
-          major: data.major || '',
-          minor: data.minor || '',
-          expectedGraduation: data.graduation_year ? `${data.graduation_year}-05` : '',
-          year: data.class_standing || 'Freshman',
-          gpa: data.gpa ?? '',
         });
+
+        const next = {};
+        for (const field of fields) {
+          const raw = field.column ? data[field.column] : details[field.name];
+          const convert = field.column && CONVERTERS[field.column]?.fromDb;
+          next[field.name] = convert ? convert(raw) : (raw ?? '');
+        }
+        setAudienceData(next);
       }
       setLoadingProfile(false);
     }
     fetchProfile();
-  }, [user]);
+    return () => { alive = false; };
+  }, [user, audience, fields]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -69,27 +164,45 @@ export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBe
     setSaved(false);
   };
 
+  const handleAudienceChange = (name, value) => {
+    setAudienceData(prev => ({ ...prev, [name]: value }));
+    setSaved(false);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const gradYear = formData.expectedGraduation
-      ? parseInt(formData.expectedGraduation.split('-')[0], 10)
-      : null;
-    const { error } = await supabase
-      .from('profiles')
-      .update({
-        full_name: `${formData.firstName} ${formData.lastName}`.trim(),
-        university_id: formData.sjsuId || null,
-        phone: formData.phone || null,
-        major: formData.major || null,
-        minor: formData.minor || null,
-        graduation_year: gradYear,
-        class_standing: formData.year,
-        gpa: formData.gpa ? parseFloat(formData.gpa) : null,
-      })
-      .eq('id', user.id);
-    if (!error) {
+    setSaveError('');
+
+    // Split the form by where each field is stored. Everything named in the
+    // `profiles` patch must be in the UPDATE allowlist -- profileService
+    // enforces that, because PostgREST rejects the whole statement if any one
+    // column is ungranted, which would break saving every other field with it.
+    const patch = {
+      full_name: `${formData.firstName} ${formData.lastName}`.trim(),
+      phone: formData.phone || null,
+    };
+    const details = {};
+
+    for (const field of fields) {
+      const value = audienceData[field.name];
+      if (field.column) {
+        const convert = CONVERTERS[field.column]?.toDb;
+        patch[field.column] = convert ? convert(value) : (value || null);
+      } else if (value !== undefined && value !== '') {
+        details[field.name] = value;
+      }
+    }
+
+    try {
+      const updated = await updateProfile(user.id, patch);
+      if (Object.keys(details).length > 0) {
+        await saveAudienceDetails(user.id, audience?.id || 'student', details);
+      }
+      onProfileChange?.(updated);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setSaveError(err?.message || 'Could not save your profile.');
     }
   };
 
@@ -241,7 +354,7 @@ export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBe
             </div>
           </div>
 
-          {/* Personal Information */}
+          {/* Personal Information -- the same for every audience */}
           <div>
             <h3 className="text-lg font-bold text-text-primary mb-4 flex items-center gap-2">
               <User2Icon size={18} className="text-sjsu-gold" />
@@ -257,7 +370,6 @@ export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBe
                   onChange={handleChange}
                   placeholder="John"
                   className={inputClass}
-                  required
                 />
               </div>
               <div>
@@ -269,24 +381,7 @@ export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBe
                   onChange={handleChange}
                   placeholder="Doe"
                   className={inputClass}
-                  required
                 />
-              </div>
-              <div>
-                <label className={labelClass}>SJSU Student ID</label>
-                <div className="relative">
-                  <Hash size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-                  <input
-                    type="text"
-                    name="sjsuId"
-                    value={formData.sjsuId}
-                    onChange={handleChange}
-                    placeholder="012345678"
-                    className={`${inputClass} pl-10`}
-                    maxLength={9}
-                    required
-                  />
-                </div>
               </div>
               <div>
                 <label className={labelClass}>Phone Number</label>
@@ -302,106 +397,48 @@ export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBe
                   />
                 </div>
               </div>
-              <div className="md:col-span-2">
-                <label className={labelClass}>SJSU Email</label>
+              <div>
+                <label className={labelClass}>Email</label>
                 <div className="relative">
                   <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+                  {/* Read-only: `email` is deliberately outside the UPDATE
+                      allowlist, since it is the subject of the domain gate.
+                      Showing it as editable would promise a save that the
+                      database refuses. */}
                   <input
                     type="email"
-                    name="email"
                     value={formData.email}
-                    onChange={handleChange}
-                    placeholder="john.doe@sjsu.edu"
-                    className={`${inputClass} pl-10`}
-                    required
+                    readOnly
+                    className={`${inputClass} pl-10 opacity-70 cursor-not-allowed`}
                   />
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Academic Information */}
-          <div>
-            <h3 className="text-lg font-bold text-text-primary mb-4 flex items-center gap-2">
-              <GraduationCap size={18} className="text-sjsu-gold" />
-              Academic Information
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div>
-                <label className={labelClass}>Major</label>
-                <div className="relative">
-                  <BookOpen size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-                  <input
-                    type="text"
-                    name="major"
-                    value={formData.major}
-                    onChange={handleChange}
-                    placeholder="Computer Science"
-                    className={`${inputClass} pl-10`}
-                    required
+          {/* Audience-specific -- driven by UI/src/config/audiences.json, so a
+              visitor is not asked for a GPA and an alum is not offered a class
+              standing of 'Freshman'. */}
+          {fields.length > 0 && (
+            <div>
+              <h3 className="text-lg font-bold text-text-primary mb-4 flex items-center gap-2">
+                <GraduationCap size={18} className="text-sjsu-gold" />
+                {audience?.label || 'Details'}
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {fields.map((field) => (
+                  <Field
+                    key={field.name}
+                    field={field}
+                    value={audienceData[field.name]}
+                    onChange={handleAudienceChange}
+                    inputClass={inputClass}
+                    labelClass={labelClass}
                   />
-                </div>
-              </div>
-              <div>
-                <label className={labelClass}>Minor (Optional)</label>
-                <div className="relative">
-                  <BookOpen size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-                  <input
-                    type="text"
-                    name="minor"
-                    value={formData.minor}
-                    onChange={handleChange}
-                    placeholder="Mathematics"
-                    className={`${inputClass} pl-10`}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelClass}>Year</label>
-                <select
-                  name="year"
-                  value={formData.year}
-                  onChange={handleChange}
-                  className={inputClass}
-                  required
-                >
-                  <option value="Freshman">Freshman</option>
-                  <option value="Sophomore">Sophomore</option>
-                  <option value="Junior">Junior</option>
-                  <option value="Senior">Senior</option>
-                  <option value="Graduate">Graduate</option>
-                </select>
-              </div>
-              <div>
-                <label className={labelClass}>GPA</label>
-                <input
-                  type="number"
-                  name="gpa"
-                  value={formData.gpa}
-                  onChange={handleChange}
-                  placeholder="3.50"
-                  className={inputClass}
-                  min="0"
-                  max="4"
-                  step="0.01"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label className={labelClass}>Expected Graduation</label>
-                <div className="relative">
-                  <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-                  <input
-                    type="month"
-                    name="expectedGraduation"
-                    value={formData.expectedGraduation}
-                    onChange={handleChange}
-                    className={`${inputClass} pl-10`}
-                    required
-                  />
-                </div>
+                ))}
               </div>
             </div>
-          </div>
+          )}
 
           {/* Save Button */}
           <div className="flex items-center gap-4 pt-4 pb-8">
@@ -416,6 +453,9 @@ export default function UserProfile({ onBack, user, behaviorSettings, onUpdateBe
               <span className="text-green-600 dark:text-green-400 text-sm font-medium animate-fade-in">
                 Profile saved successfully!
               </span>
+            )}
+            {saveError && (
+              <span className="text-red-500 dark:text-red-400 text-sm font-medium">{saveError}</span>
             )}
           </div>
         </form>

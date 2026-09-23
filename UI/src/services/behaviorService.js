@@ -198,6 +198,61 @@ export async function upsertScopedBehavior(userId, updates, { projectId = null, 
 }
 
 /**
+ * Which scope the current conversation's overrides actually come from.
+ *
+ * Returns 'conversation' | 'project' | 'user'. Never throws: the caller uses
+ * this only to label a button, so a failure degrades to 'user' rather than
+ * breaking the panel.
+ *
+ * Lived inline in App.jsx until Phase 2. It is here because App.jsx reaching
+ * into `supabase` directly meant no adapter could intercept it, and for a
+ * principal with no user id it would have queried `user_id = null`.
+ */
+export async function detectActiveScope(userId, { projectId = null, conversationId = null } = {}) {
+  if (!userId || !conversationId) return 'user';
+  try {
+    const { data } = await supabase
+      .from('behavior_settings')
+      .select('project_id, conversation_id')
+      .eq('user_id', userId);
+
+    const rows = data || [];
+    if (rows.some(r => r.conversation_id === conversationId)) return 'conversation';
+    if (projectId && rows.some(r => r.project_id === projectId && !r.conversation_id)) return 'project';
+    return 'user';
+  } catch {
+    return 'user';
+  }
+}
+
+/**
+ * The stored override row for one scope, or null when none exists.
+ *
+ * Also previously inline in App.jsx. Same contract as above: never throws, and
+ * null means "this scope has no override", which is not an error.
+ */
+export async function fetchScopedBehavior(userId, { scope, scopeId } = {}) {
+  if (!userId || !scopeId) return null;
+  try {
+    let query = supabase
+      .from('behavior_settings')
+      .select(COLUMNS)
+      .eq('user_id', userId);
+
+    if (scope === 'project') {
+      query = query.eq('project_id', scopeId).is('conversation_id', null);
+    } else {
+      query = query.eq('conversation_id', scopeId);
+    }
+
+    const { data } = await query.maybeSingle();
+    return data || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Delete a scoped behavior override (project or conversation level).
  * After deletion the scope will fall back to its parent.
  */

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import MainChat from './components/MainChat';
 import RightPanel from './components/RightPanel';
@@ -7,25 +7,23 @@ import InternJobsAlertsPage from './internAlerts/InternJobsAlertsPage.tsx';
 import Login from './components/Login';
 import Signup from './components/Signup';
 import VerifyEmail from './components/VerifyEmail';
+import Onboarding from './components/Onboarding';
 import { supabase } from './supabaseClient';
 import { ensureProfile } from './supabaseHelpers';
 import { sendMessage, generateTitle, fetchAutoBehavior, DEFAULT_MODEL_KEY } from './services/llamaService';
 import { startTurn } from './services/telemetryService';
 import { primeAuthToken, clearAuthToken, getAuthToken } from './services/authToken';
-import {
-  fetchConversations,
-  createConversation,
-  renameConversation,
-  deleteConversation,
-  fetchMessages,
-  insertMessage,
-  deleteMessage,
-  deleteMessagesAfter,
-  autoTitleIfNeeded,
-} from './services/chatService';
-import { fetchBehaviorSettings, updateBehaviorSettings, resolveEffectiveBehavior, upsertScopedBehavior, deleteScopedBehavior, DEFAULT_BEHAVIOR } from './services/behaviorService';
+// Conversations, messages, behaviour overrides, feedback and memory all go
+// through one store, so where they are kept is decided once (see
+// services/persistence.js) rather than at every call site.
+import { createPersistence, clearEphemeralStore } from './services/persistence';
+import { startGuestSession, endGuestSession } from './services/guestSession';
+import { resolveAudience } from './config/audiences';
+// Account-only surfaces stay direct: a guest never reaches the personalization
+// panel or the projects tree, and an ephemeral stand-in for either would be
+// worse than not offering them.
+import { fetchBehaviorSettings, updateBehaviorSettings, upsertScopedBehavior, deleteScopedBehavior, DEFAULT_BEHAVIOR } from './services/behaviorService';
 import ScopedBehaviorPanel from './components/ScopedBehaviorPanel';
-import { insertFeedbackLog, updateFeedbackVote } from './services/feedbackLogService';
 import {
   fetchProjects,
   createProject,
@@ -36,7 +34,6 @@ import {
   unassignConversationFromProject,
 } from './services/projectService';
 import './App.css';
-import { retrieveMemoryContext, processMemoryExtraction } from './services/memoryService';
 
 export default function App() {
   const [authPage, setAuthPage] = useState('login');
@@ -44,6 +41,14 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState('');
   const [unverifiedEmail, setUnverifiedEmail] = useState('');
+  // A visitor with no account. Held separately from `user` because the two
+  // are produced by completely different machinery: one by supabase-js, one
+  // by POST /api/guest/session.
+  const [guest, setGuest] = useState(null);
+  // The caller's `profiles` row. `null` means 'not loaded yet', which is
+  // deliberately different from 'loaded and not onboarded' -- see the gate
+  // near the bottom of this file.
+  const [profile, setProfile] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -89,13 +94,19 @@ export default function App() {
             setAuthError('');
           }
 
-          withTimeout(ensureProfile(session.user), 'Profile check').catch((profileError) => {
-            if (alive) {
-              console.warn('Profile sync warning:', profileError?.message || profileError);
-            }
-          });
+          // The return value used to be discarded. ensureProfile already does
+          // select('*'), so active_audience and onboarded_at arrive here with
+          // no extra round trip -- they were simply being thrown away.
+          withTimeout(ensureProfile(session.user), 'Profile check')
+            .then((row) => { if (alive && row) setProfile(row); })
+            .catch((profileError) => {
+              if (alive) {
+                console.warn('Profile sync warning:', profileError?.message || profileError);
+              }
+            });
         } else if (alive) {
           setUser(null);
+          setProfile(null);
           setAuthPage('login');
         }
       } catch (error) {
@@ -146,13 +157,16 @@ export default function App() {
             setAuthError('');
           }
 
-          withTimeout(ensureProfile(session.user), 'Profile sync').catch((profileError) => {
-            if (alive) {
-              console.warn('Profile sync warning:', profileError?.message || profileError);
-            }
-          });
+          withTimeout(ensureProfile(session.user), 'Profile sync')
+            .then((row) => { if (alive && row) setProfile(row); })
+            .catch((profileError) => {
+              if (alive) {
+                console.warn('Profile sync warning:', profileError?.message || profileError);
+              }
+            });
         } else if (alive) {
           setUser(null);
+          setProfile(null);
           setAuthPage('login');
         }
       } catch (error) {
@@ -167,6 +181,35 @@ export default function App() {
       subscription.unsubscribe();
     };
   }, []);
+
+  // ── Who is acting, and where their data goes ────────────────────────────────
+
+  // One object instead of `user?.id` threaded through every call site, so
+  // nothing below has to ask whether it is looking at a Supabase session or a
+  // guest. Phase 2.4 adds the guest branch; today every principal is a
+  // signed-in user, which is what makes this step a pure refactor.
+  const principal = useMemo(() => {
+    if (user?.id) return { kind: 'user', id: user.id, email: user.email };
+    if (guest?.id) return { kind: 'guest', id: guest.id };
+    return null;
+  }, [user?.id, user?.email, guest?.id]);
+
+  // Swapping this swaps where every conversation, message, override, feedback
+  // row and memory call goes. Null until sign-in, so callers guard on the store
+  // rather than on a user id.
+  const store = useMemo(() => createPersistence(principal), [principal]);
+
+  // What the UI may offer. Read by JSX; never branched on `principal.kind`.
+  const can = store?.capabilities ?? {};
+
+  // Which experience this person gets: their saved choice, or 'guest' for a
+  // visitor, who has no profile row to have chosen in. resolveAudience falls
+  // back rather than throwing, so an unrecognised stored value degrades to the
+  // default instead of blanking the screen.
+  const audience = useMemo(
+    () => resolveAudience(principal?.kind === 'guest' ? 'guest' : profile?.active_audience),
+    [principal?.kind, profile?.active_audience]
+  );
 
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [currentPage, setCurrentPage] = useState('chat');
@@ -216,7 +259,9 @@ export default function App() {
   }, [isDarkMode]);
 
   useEffect(() => {
-    if (!user?.id) return undefined;
+    // /api/jobs/fetch is gated on a 'run_jobs' grant in admin_grants, which
+    // only a real account can hold.
+    if (principal?.kind !== 'user') return undefined;
 
     const schedulerEnabled = import.meta.env.VITE_ENABLE_JOB_FETCHER_SCHEDULER === 'true';
     if (!schedulerEnabled) return undefined;
@@ -250,12 +295,12 @@ export default function App() {
     runCycle();
     const intervalId = setInterval(runCycle, schedulerMs);
     return () => clearInterval(intervalId);
-  }, [user?.id]);
+  }, [principal?.kind]);
 
   const loadConversations = useCallback(async (cursor = null) => {
-    if (!user?.id) return;
+    if (!store) return;
     try {
-      const data = await fetchConversations({ limit: 20, cursor });
+      const data = await store.listConversations({ limit: 20, cursor });
       if (cursor) {
         setConversations(prev => [...prev, ...data]);
       } else {
@@ -265,7 +310,7 @@ export default function App() {
     } catch (err) {
       console.error('Failed to load conversations:', err.message);
     }
-  }, [user?.id]);
+  }, [store]);
 
   useEffect(() => {
     loadConversations();
@@ -308,14 +353,14 @@ export default function App() {
   }, [hasMoreConversations, conversations, loadConversations]);
 
   const loadProjects = useCallback(async () => {
-    if (!user?.id) return;
+    if (!can.projects) return;
     try {
       const data = await fetchProjects();
       setProjects(data);
     } catch (err) {
       console.error('Failed to load projects:', err.message);
     }
-  }, [user?.id]);
+  }, [can.projects]);
 
   useEffect(() => {
     loadProjects();
@@ -323,17 +368,17 @@ export default function App() {
 
   // ── Load behavior settings when user logs in ────────────
   useEffect(() => {
-    if (!user?.id) return;
+    if (!can.profile || !user?.id) return;
     fetchBehaviorSettings(user.id)
       .then(setBehaviorSettings)
       .catch(err => {
         console.warn('Failed to load behavior settings, using empty overrides:', err.message);
         setBehaviorSettings({});
       });
-  }, [user?.id]);
+  }, [can.profile, user?.id]);
 
   const handleUpdateBehavior = async (updates) => {
-    if (!user?.id) return;
+    if (!can.profile || !user?.id) return;
     try {
       const updated = await updateBehaviorSettings(user.id, updates);
       setBehaviorSettings(updated);
@@ -346,51 +391,18 @@ export default function App() {
 
   // Detect which scope is active for the current conversation
   useEffect(() => {
-    if (!user?.id || !currentConversationId) {
+    if (!store || !currentConversationId) {
       setActiveBehaviorScope('user');
       return;
     }
-    const detect = async () => {
-      try {
-        const { data } = await supabase
-          .from('behavior_settings')
-          .select('project_id, conversation_id')
-          .eq('user_id', user.id);
-        const rows = data || [];
-        if (rows.some(r => r.conversation_id === currentConversationId)) {
-          setActiveBehaviorScope('conversation');
-        } else if (activeProjectId && rows.some(r => r.project_id === activeProjectId && !r.conversation_id)) {
-          setActiveBehaviorScope('project');
-        } else {
-          setActiveBehaviorScope('user');
-        }
-      } catch {
-        setActiveBehaviorScope('user');
-      }
-    };
-    detect();
-  }, [user?.id, currentConversationId, activeProjectId, scopedPanel.open]);
+    store
+      .detectActiveScope({ projectId: activeProjectId, conversationId: currentConversationId })
+      .then(setActiveBehaviorScope);
+  }, [store, currentConversationId, activeProjectId, scopedPanel.open]);
 
   const openScopedPanel = async (scope, scopeId, scopeLabel) => {
-    if (!user?.id) return;
-    // Fetch the existing override for this scope
-    try {
-      let query = supabase
-        .from('behavior_settings')
-        .select('response_tone, response_length, response_format, emoji_usage, priority_stack, project_id, conversation_id')
-        .eq('user_id', user.id);
-
-      if (scope === 'project') {
-        query = query.eq('project_id', scopeId).is('conversation_id', null);
-      } else {
-        query = query.eq('conversation_id', scopeId);
-      }
-
-      const { data } = await query.maybeSingle();
-      setScopedBehavior(data || null);
-    } catch {
-      setScopedBehavior(null);
-    }
+    if (!store) return;
+    setScopedBehavior(await store.fetchScopedBehavior({ scope, scopeId }));
 
     setScopedPanel({ open: true, scope, scopeId, scopeLabel });
 
@@ -407,7 +419,7 @@ export default function App() {
   };
 
   const handleSaveScopedBehavior = async (updates) => {
-    if (!user?.id || !scopedPanel.scopeId) return;
+    if (!can.profile || !user?.id || !scopedPanel.scopeId) return;
     try {
       const result = await upsertScopedBehavior(user.id, updates, {
         projectId: scopedPanel.scope === 'project' ? scopedPanel.scopeId : null,
@@ -420,7 +432,7 @@ export default function App() {
   };
 
   const handleDeleteScopedBehavior = async () => {
-    if (!user?.id || !scopedPanel.scopeId) return;
+    if (!can.profile || !user?.id || !scopedPanel.scopeId) return;
     try {
       await deleteScopedBehavior(user.id, {
         projectId: scopedPanel.scope === 'project' ? scopedPanel.scopeId : null,
@@ -460,7 +472,7 @@ export default function App() {
   }, []);
 
   const handleCreateProject = async (name) => {
-    if (!user?.id) return;
+    if (!can.projects || !user?.id) return;
     try {
       const project = await createProject(user.id, name);
       setProjects(prev => [project, ...prev]);
@@ -541,6 +553,7 @@ export default function App() {
   };
 
   const openConversation = useCallback(async (conversationId) => {
+    if (!store) return;
     setCurrentConversationId(conversationId);
     setMessages([]);
     setCurrentPage('chat');
@@ -549,7 +562,7 @@ export default function App() {
     setRightPanelLinks([]);
 
     try {
-      const msgs = await fetchMessages({ conversationId, limit: 30 });
+      const msgs = await store.listMessages({ conversationId, limit: 30 });
       const mapped = msgs.map(m => ({
         id: m.id,
         text: m.content,
@@ -564,16 +577,16 @@ export default function App() {
     } finally {
       setLoadingMessages(false);
     }
-  }, []);
+  }, [store]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (!currentConversationId || !hasMoreMessages || loadingMessages) return;
+    if (!store || !currentConversationId || !hasMoreMessages || loadingMessages) return;
     setLoadingMessages(true);
 
     try {
       const oldest = messages[0];
       const cursor = oldest?.created_at || null;
-      const older = await fetchMessages({ conversationId: currentConversationId, limit: 30, cursor });
+      const older = await store.listMessages({ conversationId: currentConversationId, limit: 30, cursor });
       const mapped = older.map(m => ({
         id: m.id,
         text: m.content,
@@ -587,7 +600,7 @@ export default function App() {
     } finally {
       setLoadingMessages(false);
     }
-  }, [currentConversationId, hasMoreMessages, loadingMessages, messages]);
+  }, [store, currentConversationId, hasMoreMessages, loadingMessages, messages]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -597,94 +610,28 @@ export default function App() {
     if (!loadingMessages) scrollToBottom();
   }, [messages, loadingMessages]);
 
-  const handleSend = async () => {
-    if (!input.trim() || !user?.id) return;
-    const turn = startTurn('send');
-
-    const userText = input.trim();
-
-    setInput('');
-    setIsTyping(true);
-    setStreamStatus('received');
-    setRightPanelContent('empty');
-    setRightPanelLinks([]);
-
+  // The shared tail of every assistant turn. Send, regenerate and
+  // edit-and-resubmit differ only in how they prepare the thread, so the
+  // request, the persistence and the error handling live here once instead of
+  // three times.
+  //
+  // `prepare` runs inside the try, so a failure while creating the conversation
+  // or truncating the thread lands in the same catch it always did. It returns
+  // everything the turn needs, including the placeholder id it just pushed --
+  // minting that here instead would reorder handleRegenerate's 'ack' mark.
+  //
+  // These were three near-identical copies that had already drifted: only two
+  // of them recovered when the placeholder row was gone, and they marked
+  // 'assistant_saved' at different points. Both are reconciled below.
+  const runAssistantTurn = async ({ turn, prepare }) => {
     try {
-      // Echo the user's own message before touching the network. This used to
-      // sit behind two awaited Supabase round trips (create conversation, then
-      // insert message + preview update), so the message the user just typed
-      // took 2-3 network hops to appear.
-      const tempUserId = `temp-user-${Date.now()}`;
-      const userMsg = {
-        id: tempUserId,
-        text: userText,
-        sender: 'user',
-        created_at: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, userMsg]);
-      turn.mark('ack');
-
-      let convoId = currentConversationId;
-
-      if (!convoId) {
-        const convo = await createConversation(user.id, null, activeProjectId);
-        convoId = convo.id;
-        setCurrentConversationId(convoId);
-
-        if (activeProjectId) {
-          setProjectConversations(prev => ({
-            ...prev,
-            [activeProjectId]: [convo, ...(prev[activeProjectId] || [])],
-          }));
-        } else {
-          setConversations(prev => [convo, ...prev]);
-        }
-      }
-
-      // Save the user's message alongside the chat request rather than before
-      // it: the model doesn't need the saved row, and awaiting it here added
-      // 200-600 ms to every answer. It is awaited before the assistant's row is
-      // inserted, so the two still land in order.
-      const userSave = insertMessage({
-        conversationId: convoId,
-        role: 'user',
-        content: userText,
-      }).then(userRow => {
-        turn.mark('user_saved');
-
-        // Reconcile the optimistic row with the persisted one.
-        setMessages(prev =>
-          prev.map(m =>
-            m.id === tempUserId
-              ? { ...m, id: userRow.id, created_at: userRow.created_at }
-              : m
-          )
-        );
-        patchConversation(convoId, {
-          last_message_preview: previewFor(userText),
-          updated_at: userRow.created_at,
-        });
-
-        autoTitleIfNeeded(convoId, userText, generateTitle)
-          .then(title => {
-            if (title) patchConversation(convoId, { title });
-          })
-          .catch(() => {});
-
-        return userRow;
-      });
-      // Handled when awaited below; this only stops an early failure from being
-      // reported as unhandled while the answer streams.
-      userSave.catch(() => {});
-
-      const currentMessages = [...messages, userMsg];
-      const context = currentMessages.slice(-20).map(m => ({
-        role: m.sender === 'user' ? 'user' : 'assistant',
-        content: m.text,
-      }));
-
-      const tempId = `temp-${Date.now()}`;
-      setMessages(prev => [...prev, { id: tempId, text: '', sender: 'bot' }]);
+      const {
+        conversationId,
+        context,
+        tempId,
+        sourceText,
+        userSave = null,
+      } = await prepare();
 
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
@@ -692,8 +639,8 @@ export default function App() {
 
       // Resolve manual overrides + memory in parallel
       const [manualBehavior, memoryPrompt] = await Promise.all([
-        resolveEffectiveBehavior(user.id, activeProjectId, convoId).catch(() => null),
-        retrieveMemoryContext(convoId).catch(() => ''),
+        store.resolveBehavior(activeProjectId, conversationId).catch(() => null),
+        store.retrieveMemory(conversationId).catch(() => ''),
       ]);
       turn.mark('context_ready');
       let fullResponse = '';
@@ -703,14 +650,11 @@ export default function App() {
         signal: controller.signal,
         behavior: manualBehavior,
         memoryPrompt,
+        audience: audience.id,
         onStatus: setStreamStatus,
         onChunk: (chunk) => {
           fullResponse += chunk;
-          setMessages(prev =>
-            prev.map(m =>
-              m.id === tempId ? { ...m, text: m.text + chunk } : m
-            )
-          );
+          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m));
         },
         onReplace: (text) => {
           fullResponse = text;
@@ -722,20 +666,21 @@ export default function App() {
       setRightPanelLinks(sources);
       setRightPanelContent(sources.length > 0 ? 'links' : 'empty');
 
-      // Persist assistant message, after the user's (created_at orders the thread).
-      await userSave;
-      const assistantRow = await insertMessage({
-        conversationId: convoId,
+      // Persist the assistant message after the user's (created_at orders the
+      // thread). Regenerate has no new user row to wait for.
+      if (userSave) await userSave;
+      const assistantRow = await store.insertMessage({
+        conversationId,
         role: 'assistant',
         content: fullResponse,
       });
       turn.mark('assistant_saved');
 
-      // Fire-and-forget: feedback log + memory extraction
-      insertFeedbackLog({
+      // Fire-and-forget: feedback log + memory extraction. Both are no-ops for
+      // a guest -- neither has a user id to attribute a row to.
+      store.logFeedback({
         responseId:       assistantRow.id,
-        userId:           user.id,
-        conversationId:   convoId,
+        conversationId,
         behaviorSnapshot: manualBehavior,
         validatorsRun:    assistantMeta?.validatorsRun    ?? [],
         validatorsPassed: assistantMeta?.validatorsPassed ?? true,
@@ -743,18 +688,12 @@ export default function App() {
         modelUsed:        selectedModel,
       }).catch(() => {});
 
-      processMemoryExtraction(convoId, assistantRow.id, userText, fullResponse).catch(() => {});
+      store.extractMemory(conversationId, assistantRow.id, sourceText, fullResponse).catch(() => {});
 
       // Replace temp message with persisted one
-      setMessages(prev =>
-        prev.map(m =>
-          m.id === tempId
-            ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at }
-            : m
-        )
-      );
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m));
 
-      patchConversation(convoId, {
+      patchConversation(conversationId, {
         last_message_preview: previewFor(fullResponse),
         updated_at: assistantRow.created_at,
       });
@@ -773,6 +712,10 @@ export default function App() {
       });
       if (err.name === 'AbortError') return;
 
+      // Patch the placeholder while it is still the last message; append a
+      // fresh row if it never got pushed or has already been replaced.
+      // Regenerate used to only patch by id, so an error that arrived after the
+      // placeholder went away was silent.
       setMessages(prev => {
         const last = prev[prev.length - 1];
         if (last?.sender === 'bot') {
@@ -796,8 +739,104 @@ export default function App() {
     }
   };
 
+  const handleSend = async () => {
+    if (!input.trim() || !store) return;
+    const turn = startTurn('send');
+
+    const userText = input.trim();
+
+    setInput('');
+    setIsTyping(true);
+    setStreamStatus('received');
+    setRightPanelContent('empty');
+    setRightPanelLinks([]);
+
+    await runAssistantTurn({
+      turn,
+      prepare: async () => {
+        // Echo the user's own message before touching the network. This used to
+        // sit behind two awaited Supabase round trips (create conversation, then
+        // insert message + preview update), so the message the user just typed
+        // took 2-3 network hops to appear.
+        const tempUserId = `temp-user-${Date.now()}`;
+        const userMsg = {
+          id: tempUserId,
+          text: userText,
+          sender: 'user',
+          created_at: new Date().toISOString(),
+        };
+        setMessages(prev => [...prev, userMsg]);
+        turn.mark('ack');
+
+        let convoId = currentConversationId;
+
+        if (!convoId) {
+          const convo = await store.createConversation(null, activeProjectId, audience.id);
+          convoId = convo.id;
+          setCurrentConversationId(convoId);
+
+          if (activeProjectId) {
+            setProjectConversations(prev => ({
+              ...prev,
+              [activeProjectId]: [convo, ...(prev[activeProjectId] || [])],
+            }));
+          } else {
+            setConversations(prev => [convo, ...prev]);
+          }
+        }
+
+        // Save the user's message alongside the chat request rather than before
+        // it: the model doesn't need the saved row, and awaiting it here added
+        // 200-600 ms to every answer. It is awaited before the assistant's row
+        // is inserted, so the two still land in order.
+        const userSave = store.insertMessage({
+          conversationId: convoId,
+          role: 'user',
+          content: userText,
+        }).then(userRow => {
+          turn.mark('user_saved');
+
+          // Reconcile the optimistic row with the persisted one.
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === tempUserId
+                ? { ...m, id: userRow.id, created_at: userRow.created_at }
+                : m
+            )
+          );
+          patchConversation(convoId, {
+            last_message_preview: previewFor(userText),
+            updated_at: userRow.created_at,
+          });
+
+          store.autoTitle(convoId, userText, generateTitle)
+            .then(title => {
+              if (title) patchConversation(convoId, { title });
+            })
+            .catch(() => {});
+
+          return userRow;
+        });
+        // Awaited in runAssistantTurn; this only stops an early failure from
+        // being reported as unhandled while the answer streams.
+        userSave.catch(() => {});
+
+        const currentMessages = [...messages, userMsg];
+        const context = currentMessages.slice(-20).map(m => ({
+          role: m.sender === 'user' ? 'user' : 'assistant',
+          content: m.text,
+        }));
+
+        const tempId = `temp-${Date.now()}`;
+        setMessages(prev => [...prev, { id: tempId, text: '', sender: 'bot' }]);
+
+        return { conversationId: convoId, context, tempId, sourceText: userText, userSave };
+      },
+    });
+  };
+
   const handleRegenerate = async () => {
-    if (!currentConversationId || !user?.id || isTyping) return;
+    if (!currentConversationId || !store || isTyping) return;
 
     const lastBotIdx = [...messages].reverse().findIndex(m => m.sender === 'bot');
     if (lastBotIdx === -1) return;
@@ -821,7 +860,7 @@ export default function App() {
       !String(botMsg.id).startsWith('err-')
     ) {
       try {
-        await deleteMessage(botMsg.id);
+        await store.deleteMessage(botMsg.id);
       } catch {
         // best-effort delete; continue regenerating even if the row is gone
       }
@@ -831,104 +870,35 @@ export default function App() {
     setIsTyping(true);
     setStreamStatus('received');
 
-    const context = messages
-      .slice(0, botIdx)
-      .slice(-20)
-      .map(m => ({
-        role: m.sender === 'user' ? 'user' : 'assistant',
-        content: m.text,
-      }));
+    await runAssistantTurn({
+      turn,
+      prepare: async () => {
+        const context = messages
+          .slice(0, botIdx)
+          .slice(-20)
+          .map(m => ({
+            role: m.sender === 'user' ? 'user' : 'assistant',
+            content: m.text,
+          }));
 
-    const tempId = `temp-${Date.now()}`;
-    setMessages(prev => [...prev, { id: tempId, text: '', sender: 'bot' }]);
-    turn.mark('ack');
+        const tempId = `temp-${Date.now()}`;
+        setMessages(prev => [...prev, { id: tempId, text: '', sender: 'bot' }]);
+        turn.mark('ack');
 
-    if (abortRef.current) abortRef.current.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      // Resolve manual overrides + memory in parallel
-      const [manualBehavior, memoryPrompt] = await Promise.all([
-        resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => null),
-        retrieveMemoryContext(currentConversationId).catch(() => ''),
-      ]);
-      turn.mark('context_ready');
-      let fullResponse = '';
-      const assistantMeta = await sendMessage({
-        messages: context,
-        model: selectedModel,
-        signal: controller.signal,
-        behavior: manualBehavior,
-        memoryPrompt,
-        onStatus: setStreamStatus,
-        onChunk: (chunk) => {
-          fullResponse += chunk;
-          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m));
-        },
-        onReplace: (text) => {
-          fullResponse = text;
-          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text } : m));
-        },
-      });
-
-      const sources = assistantMeta?.sources || [];
-      setRightPanelLinks(sources);
-      setRightPanelContent(sources.length > 0 ? 'links' : 'empty');
-
-      const assistantRow = await insertMessage({
-        conversationId: currentConversationId,
-        role: 'assistant',
-        content: fullResponse,
-      });
-
-      insertFeedbackLog({
-        responseId:       assistantRow.id,
-        userId:           user.id,
-        conversationId:   currentConversationId,
-        behaviorSnapshot: manualBehavior,
-        validatorsRun:    assistantMeta?.validatorsRun    ?? [],
-        validatorsPassed: assistantMeta?.validatorsPassed ?? true,
-        repairsApplied:   assistantMeta?.repairsApplied   ?? [],
-        modelUsed:        selectedModel,
-      }).catch(() => {});
-
-      turn.mark('assistant_saved');
-      processMemoryExtraction(currentConversationId, assistantRow.id, userMsg.text, fullResponse).catch(() => {});
-
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m));
-      patchConversation(currentConversationId, {
-        last_message_preview: previewFor(fullResponse),
-        updated_at: assistantRow.created_at,
-      });
-      turn.finish({
-        outcome: 'ok',
-        requestId: assistantMeta?.requestId,
-        model: selectedModel,
-        stream: assistantMeta?.timings,
-      });
-    } catch (err) {
-      turn.finish({
-        outcome: err.name === 'AbortError' ? 'aborted' : 'error',
-        requestId: err.requestId,
-        model: selectedModel,
-        stream: err.timings,
-      });
-      if (err.name === 'AbortError') return;
-      setMessages(prev =>
-        prev.map(m =>
-          m.id === tempId ? { ...m, text: `**Error:** ${err.message}` } : m
-        )
-      );
-    } finally {
-      setIsTyping(false);
-      setStreamStatus(null);
-      abortRef.current = null;
-    }
+        // No userSave: regenerating reuses the user's existing message, so
+        // there is no new row to insert or wait for.
+        return {
+          conversationId: currentConversationId,
+          context,
+          tempId,
+          sourceText: userMsg.text,
+        };
+      },
+    });
   };
 
   const handleEditAndResubmit = async (msgId, newText) => {
-    if (!currentConversationId || !user?.id || isTyping) return;
+    if (!currentConversationId || !store || isTyping) return;
 
     const msgIdx = messages.findIndex(m => m.id === msgId);
     if (msgIdx === -1) return;
@@ -949,138 +919,56 @@ export default function App() {
     setIsTyping(true);
     setStreamStatus('received');
 
-    try {
-      // The old message and everything after it must be gone before the edited
-      // one is inserted: the delete matches created_at >= the original's.
-      if (originalMsg.created_at) {
-        try {
-          await deleteMessagesAfter(currentConversationId, originalMsg.created_at);
-        } catch {
-          // best-effort cleanup; local state is the source of truth here
+    await runAssistantTurn({
+      turn,
+      prepare: async () => {
+        // The old message and everything after it must be gone before the
+        // edited one is inserted: the delete matches created_at >= the
+        // original's.
+        if (originalMsg.created_at) {
+          try {
+            await store.deleteMessagesAfter(currentConversationId, originalMsg.created_at);
+          } catch {
+            // best-effort cleanup; local state is the source of truth here
+          }
         }
-      }
 
-      // As in handleSend: saved alongside the chat request, awaited before the
-      // assistant's row.
-      const userSave = insertMessage({
-        conversationId: currentConversationId,
-        role: 'user',
-        content: newText,
-      }).then(userRow => {
-        turn.mark('user_saved');
-        setMessages(prev =>
-          prev.map(m =>
-            m.id === tempUserId
-              ? { ...m, id: userRow.id, created_at: userRow.created_at }
-              : m
-          )
-        );
-        return userRow;
-      });
-      userSave.catch(() => {});
-
-      const context = [...preceding, userMsg].slice(-20).map(m => ({
-        role: m.sender === 'user' ? 'user' : 'assistant',
-        content: m.text,
-      }));
-
-      const tempId = `temp-${Date.now()}`;
-      setMessages(prev => [...prev, { id: tempId, text: '', sender: 'bot' }]);
-
-      if (abortRef.current) abortRef.current.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      // Resolve manual overrides + memory in parallel
-      const [manualBehavior, memoryPrompt] = await Promise.all([
-        resolveEffectiveBehavior(user.id, activeProjectId, currentConversationId).catch(() => null),
-        retrieveMemoryContext(currentConversationId).catch(() => ''),
-      ]);
-      turn.mark('context_ready');
-      let fullResponse = '';
-      const assistantMeta = await sendMessage({
-        messages: context,
-        model: selectedModel,
-        signal: controller.signal,
-        behavior: manualBehavior,
-        memoryPrompt,
-        onStatus: setStreamStatus,
-        onChunk: (chunk) => {
-          fullResponse += chunk;
-          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text: m.text + chunk } : m));
-        },
-        onReplace: (text) => {
-          fullResponse = text;
-          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, text } : m));
-        },
-      });
-
-      const sources = assistantMeta?.sources || [];
-      setRightPanelLinks(sources);
-      setRightPanelContent(sources.length > 0 ? 'links' : 'empty');
-
-      // After the user's row, so created_at keeps the thread in order.
-      await userSave;
-      const assistantRow = await insertMessage({
-        conversationId: currentConversationId,
-        role: 'assistant',
-        content: fullResponse,
-      });
-
-      insertFeedbackLog({
-        responseId:       assistantRow.id,
-        userId:           user.id,
-        conversationId:   currentConversationId,
-        behaviorSnapshot: manualBehavior,
-        validatorsRun:    assistantMeta?.validatorsRun    ?? [],
-        validatorsPassed: assistantMeta?.validatorsPassed ?? true,
-        repairsApplied:   assistantMeta?.repairsApplied   ?? [],
-        modelUsed:        selectedModel,
-      }).catch(() => {});
-
-      turn.mark('assistant_saved');
-      processMemoryExtraction(currentConversationId, assistantRow.id, newText, fullResponse).catch(() => {});
-
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, id: assistantRow.id, created_at: assistantRow.created_at } : m));
-      patchConversation(currentConversationId, {
-        last_message_preview: previewFor(fullResponse),
-        updated_at: assistantRow.created_at,
-      });
-      turn.finish({
-        outcome: 'ok',
-        requestId: assistantMeta?.requestId,
-        model: selectedModel,
-        stream: assistantMeta?.timings,
-      });
-    } catch (err) {
-      turn.finish({
-        outcome: err.name === 'AbortError' ? 'aborted' : 'error',
-        requestId: err.requestId,
-        model: selectedModel,
-        stream: err.timings,
-      });
-      if (err.name === 'AbortError') return;
-      setMessages(prev => {
-        const last = prev[prev.length - 1];
-        if (last?.sender === 'bot') {
-          return prev.map(m =>
-            m.id === last.id ? { ...m, text: `**Error:** ${err.message}` } : m
+        // As in handleSend: saved alongside the chat request, awaited before
+        // the assistant's row.
+        const userSave = store.insertMessage({
+          conversationId: currentConversationId,
+          role: 'user',
+          content: newText,
+        }).then(userRow => {
+          turn.mark('user_saved');
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === tempUserId
+                ? { ...m, id: userRow.id, created_at: userRow.created_at }
+                : m
+            )
           );
-        }
-        return [
-          ...prev,
-          {
-            id: `err-${Date.now()}`,
-            text: `**Error:** ${err.message}`,
-            sender: 'bot',
-          },
-        ];
-      });
-    } finally {
-      setIsTyping(false);
-      setStreamStatus(null);
-      abortRef.current = null;
-    }
+          return userRow;
+        });
+        userSave.catch(() => {});
+
+        const context = [...preceding, userMsg].slice(-20).map(m => ({
+          role: m.sender === 'user' ? 'user' : 'assistant',
+          content: m.text,
+        }));
+
+        const tempId = `temp-${Date.now()}`;
+        setMessages(prev => [...prev, { id: tempId, text: '', sender: 'bot' }]);
+
+        return {
+          conversationId: currentConversationId,
+          context,
+          tempId,
+          sourceText: newText,
+          userSave,
+        };
+      },
+    });
   };
 
   const handleSuggestionClick = (text) => {
@@ -1089,9 +977,9 @@ export default function App() {
 
   // ── Feedback vote (thumbs-up / thumbs-down on bot messages) ──────────────
   const handleFeedback = useCallback((msgId, type) => {
-    if (!user?.id || !type) return;
-    updateFeedbackVote(msgId, user.id, type).catch(() => {});
-  }, [user?.id]);
+    if (!store || !type) return;
+    store.voteFeedback(msgId, type).catch(() => {});
+  }, [store]);
 
   // ── New chat ──────────────────────────────────────────────
   const startNewChat = () => {
@@ -1105,7 +993,7 @@ export default function App() {
 
   const handleRenameConversation = async (convoId, newTitle) => {
     try {
-      await renameConversation(convoId, newTitle);
+      await store.renameConversation(convoId, newTitle);
       setConversations(prev =>
         prev.map(c => (c.id === convoId ? { ...c, title: newTitle } : c))
       );
@@ -1116,7 +1004,7 @@ export default function App() {
 
   const handleDeleteConversation = async (convoId) => {
     try {
-      await deleteConversation(convoId);
+      await store.deleteConversation(convoId);
       setConversations(prev => prev.filter(c => c.id !== convoId));
       setProjectConversations(prev => {
         const next = {};
@@ -1146,13 +1034,34 @@ export default function App() {
     setAuthPage(null);
   };
 
+  /**
+   * Start a guest session.
+   *
+   * Throws are surfaced through `authError` on the login screen rather than
+   * swallowed: a "Continue as guest" button that silently does nothing is
+   * worse than a message saying why.
+   */
+  const handleContinueAsGuest = async () => {
+    setAuthError('');
+    const session = await startGuestSession();
+    clearEphemeralStore();
+    setGuest({ id: session.guestId });
+    setAuthPage(null);
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     // signOut() fires SIGNED_OUT with a null session, which clears this too --
     // but it can fail on a network error while the local state is cleared
     // regardless, and a stale token must not outlive the session.
     clearAuthToken();
+    // A guest's conversation lives in a module-level Map, so it outlives this
+    // component and would otherwise be visible to whoever signs in next.
+    clearEphemeralStore();
+    endGuestSession();
+    setGuest(null);
     setUser(null);
+    setProfile(null);
     setAuthPage('login');
     setMessages([]);
     setConversations([]);
@@ -1174,17 +1083,23 @@ export default function App() {
     );
   }
 
-  if (authPage === 'login') {
+  // Derived from `principal`, not from authPage alone. onAuthStateChange
+  // (:110) calls setAuthPage('login') on every session event supabase-js
+  // produces -- including the null session a guest's tab reports -- so a gate
+  // that only read authPage would throw a guest back to the login screen
+  // mid-conversation. A guest has a principal, so these three are skipped.
+  if (!principal && authPage === 'login') {
     return (
       <Login
         onLogin={handleLogin}
+        onContinueAsGuest={handleContinueAsGuest}
         onSwitchToSignup={() => setAuthPage('signup')}
         authError={authError}
       />
     );
   }
 
-  if (authPage === 'signup') {
+  if (!principal && authPage === 'signup') {
     return (
       <Signup
         onSignup={handleSignup}
@@ -1193,13 +1108,29 @@ export default function App() {
     );
   }
 
-  if (authPage === 'verify-email') {
+  if (!principal && authPage === 'verify-email') {
     return (
       <VerifyEmail
         email={unverifiedEmail}
         onBackToLogin={() => setAuthPage('login')}
       />
     );
+  }
+
+  // Onboarding, gated on profile state rather than on authPage.
+  //
+  // Three properties this shape buys, all of which the authPage machine would
+  // have cost:
+  //   - It cannot be stomped. onAuthStateChange sets authPage(null) on every
+  //     session event; this only ever *reads* authPage.
+  //   - `profile === null` means "not loaded yet" and falls through to the app,
+  //     so a slow or failed profile fetch degrades to today's behaviour instead
+  //     of trapping someone on a blank gate. ensureProfile is fire-and-forget
+  //     behind a 12s timeout whose catch only warns, so that path is real.
+  //   - A guest has no `user`, so the gate is invisible to them by
+  //     construction, with no extra condition.
+  if (user && profile && !profile.onboarded_at) {
+    return <Onboarding user={user} profile={profile} onDone={setProfile} />;
   }
 
   return (
@@ -1212,6 +1143,8 @@ export default function App() {
         onInternAlertsClick={() => setCurrentPage('intern-alerts')}
         onLogout={handleLogout}
         user={user}
+        capabilities={can}
+        isGuest={principal?.kind === 'guest'}
         currentPage={currentPage}
         conversations={conversations}
         currentConversationId={currentConversationId}
@@ -1233,19 +1166,25 @@ export default function App() {
         onProjectBehaviorSettings={handleOpenProjectBehavior}
       />
 
-      {currentPage === 'profile' ? (
+      {/* Capability-checked as well as hidden in the sidebar: the entry points
+          are gone for a guest, but currentPage is state that survives a
+          principal change, so the page itself must refuse too. */}
+      {currentPage === 'profile' && can.profile ? (
         <UserProfile
           onBack={() => setCurrentPage('chat')}
           user={user}
+          audience={audience}
+          onProfileChange={setProfile}
           behaviorSettings={behaviorSettings}
           onUpdateBehavior={handleUpdateBehavior}
           autoBehavior={autoBehavior}
         />
-      ) : currentPage === 'intern-alerts' ? (
+      ) : currentPage === 'intern-alerts' && can.internAlerts ? (
         <InternJobsAlertsPage onBack={() => setCurrentPage('chat')} />
       ) : (
         <>
           <MainChat
+            audience={audience}
             messages={messages}
             input={input}
             setInput={setInput}

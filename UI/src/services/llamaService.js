@@ -19,7 +19,20 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
  */
 const DEFAULT_MODEL_KEY = 'quality';
 
-/** Build a readable message from a non-2xx response, including FastAPI's validation detail. */
+/**
+ * Turn a non-2xx response into something a person can act on.
+ *
+ * The three access statuses are named, because they mean genuinely different
+ * things and the UI's right response differs for each:
+ *
+ *   401  the token is missing or has expired      -> start over
+ *   403  the token is fine, the account is not    -> sign in
+ *   429  the token and account are fine, slow down
+ *
+ * Until Phase 2 all three came out as "Backend error (4xx): ..." alongside
+ * genuine 500s, so a guest hitting an account-only endpoint read the same as a
+ * crash. 403 in particular must not read as "try again".
+ */
 async function describeHttpError(res) {
   let raw = '';
   try {
@@ -41,6 +54,18 @@ async function describeHttpError(res) {
     // not JSON — keep the raw text
   }
 
+  if (res.status === 401) {
+    return 'Your session has expired. Reload the page to continue.';
+  }
+  if (res.status === 403) {
+    return 'Sign in with an SJSU account to use this.';
+  }
+  if (res.status === 429) {
+    const retry = Number(res.headers.get('Retry-After') || 0);
+    const wait = retry > 60 ? `${Math.ceil(retry / 60)} minutes` : `${retry || 30} seconds`;
+    return `You're sending messages faster than the assistant can keep up. Try again in ${wait}.`;
+  }
+
   return `Backend error (${res.status})${detail ? `: ${detail}` : ''}`;
 }
 
@@ -48,10 +73,13 @@ async function describeHttpError(res) {
  * An Error that keeps the stream's timings and request id, so a failed turn is
  * still measurable (telemetryService) and can be matched to the server's log.
  */
-function streamFailure(message, timings, requestId) {
+function streamFailure(message, timings, requestId, status = null) {
   const error = new Error(message);
   error.timings = timings;
   error.requestId = requestId;
+  // The status is carried so a caller can branch on it -- offering a sign-in
+  // for 403, say -- rather than matching on the message text.
+  error.status = status;
   return error;
 }
 
@@ -79,7 +107,7 @@ function describeStreamError(error) {
  * @param {string} [options.memoryPrompt] - memory context to inject
  * @returns {Promise<Object>} validator metadata, plus `timings`
  */
-export async function sendMessage({ messages, model = DEFAULT_MODEL_KEY, onChunk, onReplace, onStatus, signal, behavior, memoryPrompt }) {
+export async function sendMessage({ messages, model = DEFAULT_MODEL_KEY, onChunk, onReplace, onStatus, signal, behavior, memoryPrompt, audience }) {
   // Marks for the latency work. `headers` is the dead-air metric: how long the
   // browser waits for response headers, which is where retrieval used to sit.
   const timings = { send: performance.now() };
@@ -98,6 +126,9 @@ export async function sendMessage({ messages, model = DEFAULT_MODEL_KEY, onChunk
       model,
       behavior: behavior || null,
       memory_prompt: memoryPrompt || null,
+      // Selects prompt text and which domains retrieval prefers. The server
+      // does not trust it for anything authorization-shaped.
+      audience: audience || null,
     }),
     signal,
   });
@@ -105,7 +136,7 @@ export async function sendMessage({ messages, model = DEFAULT_MODEL_KEY, onChunk
   timings.headers = performance.now();
 
   if (!res.ok) {
-    throw streamFailure(await describeHttpError(res), timings, null);
+    throw streamFailure(await describeHttpError(res), timings, null, res.status);
   }
 
   const reader = res.body.getReader();
