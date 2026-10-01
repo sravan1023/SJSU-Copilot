@@ -149,7 +149,7 @@ def test_flush_with_an_explicit_trace_works_outside_the_context():
 # ── 2. The chat route ─────────────────────────────────────────────────────────
 
 
-async def _no_rag(messages, audience=None):
+async def _no_rag(messages, audience=None, **_kw):
     return None, []
 
 
@@ -204,7 +204,7 @@ def test_error_and_upstream_error_outcomes():
 
 def test_timing_line_is_written_when_the_client_disconnects():
     """Timing must survive a client that goes away mid-stream."""
-    async def _slow_rag(messages, audience=None):
+    async def _slow_rag(messages, audience=None, **_kw):
         await asyncio.sleep(3)
         return None, []
 

@@ -821,7 +821,7 @@ def test_the_timing_line_carries_the_principal():
 # ── Shared stubs ──────────────────────────────────────────────────────────────
 
 
-async def _no_rag(messages, audience=None):
+async def _no_rag(messages, audience=None, **_kw):
     return "", []
 
 

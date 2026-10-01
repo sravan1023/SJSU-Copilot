@@ -106,14 +106,23 @@ def _request_id(request: Request) -> str:
     return supplied if _REQUEST_ID_RE.fullmatch(supplied) else uuid.uuid4().hex
 
 
-async def _retrieve_with_keepalive(messages: list[dict], request_id: str, audience: str | None = None):
+async def _retrieve_with_keepalive(
+    messages: list[dict],
+    request_id: str,
+    audience: str | None = None,
+    principal_kind: str = "guest",
+):
     """Run retrieval, emitting SSE comments while it works.
 
     Yields keepalive frames, then finally a ("result", (rag_prompt, sources))
     tuple. Retrieval is a task so a client disconnect can cancel it rather than
     leaving the search and crawl running.
     """
-    task = asyncio.create_task(build_rag_prompt(messages, audience))
+    # principal_kind defaults to the least-privileged value everywhere it is
+    # threaded, so a call site that forgets it under-shares rather than leaks.
+    task = asyncio.create_task(
+        build_rag_prompt(messages, audience, principal_kind=principal_kind)
+    )
     try:
         while True:
             done, _ = await asyncio.wait({task}, timeout=KEEPALIVE_SECONDS)
@@ -185,7 +194,9 @@ async def chat(
 
             rag_prompt, sources = None, []
             with observability.stage("rag.total"):
-                async for item in _retrieve_with_keepalive(messages, request_id, audience):
+                async for item in _retrieve_with_keepalive(
+                    messages, request_id, audience, principal.kind
+                ):
                     if isinstance(item, tuple):
                         rag_prompt, sources = item[1]
                     else:

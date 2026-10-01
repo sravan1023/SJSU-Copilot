@@ -16,6 +16,8 @@ from ddgs import DDGS
 import audiences
 import observability
 import runtime
+from services import kb_retrieval
+from services.freshness import is_time_sensitive
 from services.llm import rewrite_query_for_sjsu
 
 logger = logging.getLogger(__name__)
@@ -430,7 +432,7 @@ _PRONOUN_RE = re.compile(
 # model will not use.
 _META_OPERATION_RE = re.compile(
     r"\b(rewrite|rephrase|reword|reformat|shorten|lengthen|expand|simplify|"
-    r"clarify|condense|elaborate|summar(?:ise|ize)|translate|repeat|"
+    r"clarify|condense|elaborate|summar(?:ise|ize|y)|recap|translate|repeat|"
     r"bullet|bullets|table|shorter|longer|simpler|concise|verbose)\b",
     re.IGNORECASE,
 )
@@ -438,7 +440,19 @@ _META_OPERATION_RE = re.compile(
 # What a meta request points at: the previous answer.
 _META_TARGET_RE = re.compile(
     r"\b(that|this|it|above|again|your\s+(?:answer|response|reply)|"
-    r"the\s+(?:answer|response|reply))\b",
+    r"the\s+(?:answer|response|reply)|"
+    # The conversation itself is also a target, and omitting it let
+    # "Summarize everything we discussed as a bullet list" through to retrieval,
+    # where it becomes a web search for the literal phrase. The three sibling
+    # phrasings in bench/questions.jsonl ("Can you make that shorter?", "Rewrite
+    # that as a short checklist", "Say that again but shorter") were all caught,
+    # so this read as working. Spelled out rather than keying on "everything",
+    # which on its own would swallow real questions like "everything I need to
+    # apply as a transfer student".
+    r"(?:everything|all|what)\s+(?:we|you|i)\s+"
+    r"(?:discussed|said|talked\s+about|covered|went\s+over)|"
+    r"(?:our|the|this)\s+(?:conversation|chat|discussion|thread)|"
+    r"so\s+far)\b",
     re.IGNORECASE,
 )
 
@@ -605,12 +619,123 @@ async def _search_within(rewritten: str, budget: float, audience: str | None = N
     return results
 
 
-async def build_rag_prompt(messages: list[dict], audience: str | None = None) -> tuple[str | None, list[dict]]:
+def assemble_context(items: list[dict]) -> tuple[list[str], list[dict], int]:
+    """Pack sources into numbered context blocks under one character budget.
+
+    Shared by both retrieval paths. It exists as a function because the budget
+    used to live inline in build_rag_prompt, and `MAX_SOURCES` is enforced
+    further upstream still, inside `rank_sources` -- so a knowledge-base path
+    that did not call `rank_sources` would have had no source cap at all and a
+    second, independent copy of the character accounting. Two copies of a budget
+    drift; one cannot.
+
+    `items` must already be in final citation order: the `[N]` marker is the
+    1-based position in the returned `used_sources`, and the model is told to
+    cite by that number, so reordering here would mislabel every citation.
+
+    Each item needs `title`, `url` and `content`. Anything else is ignored but
+    preserved on nothing -- the returned source dicts carry only title and url,
+    which is all UI/src/components/RightPanel.jsx reads.
+    """
+    context_blocks: list[str] = []
+    used_sources: list[dict] = []
+    total_chars = 0
+
+    for item in items[:MAX_SOURCES]:
+        content = item.get("content") or ""
+        if not content:
+            continue
+        remaining = MAX_TOTAL_CHARS - total_chars
+        if remaining <= 0:
+            break
+        if len(content) > remaining:
+            # Cut at a word boundary: a half word is noise to the model and a
+            # dead lexeme to anything that indexes it later. The ellipsis is
+            # reserved out of the budget rather than appended after it, and the
+            # word-boundary trim only applies when there is a space to trim to --
+            # the old `[:remaining].rsplit(" ", 1)[0] + "..."` overshot
+            # MAX_TOTAL_CHARS by three chars on any text, and by three on text
+            # with no spaces at all, where rsplit returns the whole slice.
+            cut = content[: max(0, remaining - 3)]
+            head, space, _ = cut.rpartition(" ")
+            content = (head if space else cut) + "..."
+        total_chars += len(content)
+
+        title = item.get("title") or item["url"]
+        used_sources.append({"title": title, "url": item["url"]})
+        header = f"[{len(used_sources)}] {title} - {item['url']}"
+        # Provenance, when the caller has it. The knowledge base does; live
+        # search does not, because a page crawled this second needs no date.
+        verified = item.get("verified_on")
+        if verified:
+            header += f" (verified {verified})"
+        context_blocks.append(f"{header}\n{content}")
+
+    return context_blocks, used_sources, total_chars
+
+
+def build_rag_prompt_text(context_blocks: list[str]) -> str:
+    """The instruction wrapper around retrieved context, shared by both paths."""
+    return (
+        "Answer the question using the context below. "
+        "If the context is incomplete, give the best possible answer and explicitly note what is missing. "
+        "Only say you don't know if there is no relevant context at all. "
+        "Cite sources using [1], [2], etc.\n\n"
+        "Context:\n" + "\n\n".join(context_blocks)
+    )
+
+
+async def build_rag_prompt(
+    messages: list[dict],
+    audience: str | None = None,
+    *,
+    principal_kind: str = "guest",
+) -> tuple[str | None, list[dict]]:
     with observability.stage("rag.prepare"):
         question = prepare_rag_query(messages)
     observability.record("rag_skipped", 0 if question else 1)
     if not question:
         return None, []
+
+    # Try the knowledge base before the deadline clock starts, so a miss does
+    # not eat the live path's budget. Deliberately after prepare_rag_query:
+    # its conversational and meta gates apply to the KB too -- a stored answer
+    # to "summarise that" is just as wrong as a searched one.
+    #
+    # The question is used pre-rewrite on purpose. rewrite_query_for_sjsu
+    # produces a web-search-shaped string with site hints and expanded
+    # acronyms, which is the wrong input for a corpus that is already entirely
+    # SJSU. Answering from the KB here also skips the rewrite's provider round
+    # trip entirely, which is one of the three reasons the KB exists.
+    if kb_retrieval.enabled():
+        observability.incr("kb_attempted")
+        if is_time_sensitive(question):
+            # A stored answer to a date question is wrong with the confidence of
+            # a citation. Fall through regardless of how good the hits look.
+            observability.incr("kb_time_sensitive_skip")
+        else:
+            with observability.stage("rag.kb"):
+                chunks = await kb_retrieval.search_kb(
+                    question,
+                    audience,
+                    include_authenticated=(principal_kind == "user"),
+                )
+            observability.record("kb_hits", len(chunks))
+            if chunks:
+                observability.record(
+                    "kb_rank_top", round(max(c.rank for c in chunks), 6)
+                )
+            if kb_retrieval.sufficient(chunks):
+                blocks, used_sources, chars = assemble_context(
+                    kb_retrieval.kb_items(chunks)
+                )
+                if blocks:
+                    observability.incr("kb_answered")
+                    observability.record("sources_used", len(used_sources))
+                    observability.record("context_chars", chars)
+                    return build_rag_prompt_text(blocks), used_sources
+            elif chunks:
+                observability.incr("kb_insufficient")
 
     deadline = time.monotonic() + RETRIEVAL_DEADLINE
 
@@ -661,36 +786,27 @@ async def build_rag_prompt(messages: list[dict], audience: str | None = None) ->
     )
     with observability.stage("rag.assemble"):
         page_by_url = {p["url"]: p for p in pages}
-        used_sources = []
-        context_blocks = []
-        total_chars = 0
+        items: list[dict] = []
         snippet_fallbacks = 0
-
         for source in top_sources:
             page = page_by_url.get(source["url"])
             content = page.get("content", "") if page else ""
             if not content:
-                snippet = source.get("snippet") or ""
-                if snippet:
-                    content = snippet
-                    snippet_fallbacks += 1
-                else:
+                # The page did not finish inside the deadline. Its search
+                # snippet is thin but better than dropping the source.
+                content = source.get("snippet") or ""
+                if not content:
                     continue
-            remaining = MAX_TOTAL_CHARS - total_chars
-            if remaining <= 0:
-                break
-            if len(content) > remaining:
-                content = content[:remaining].rsplit(" ", 1)[0] + "..."
-            total_chars += len(content)
-            used_sources.append(
+                snippet_fallbacks += 1
+            items.append(
                 {
                     "title": source.get("title") or source["url"],
                     "url": source["url"],
+                    "content": content,
                 }
             )
-            context_blocks.append(
-                f"[{len(used_sources)}] {used_sources[-1]['title']} - {used_sources[-1]['url']}\n{content}"
-            )
+
+        context_blocks, used_sources, total_chars = assemble_context(items)
 
     observability.record("sources_used", len(used_sources))
     observability.record("snippet_fallbacks", snippet_fallbacks)
@@ -698,14 +814,7 @@ async def build_rag_prompt(messages: list[dict], audience: str | None = None) ->
     if not context_blocks:
         return None, []
 
-    prompt = (
-        "Answer the question using the context below. "
-        "If the context is incomplete, give the best possible answer and explicitly note what is missing. "
-        "Only say you don't know if there is no relevant context at all. "
-        "Cite sources using [1], [2], etc.\n\n"
-        "Context:\n" + "\n\n".join(context_blocks)
-    )
-    return prompt, used_sources
+    return build_rag_prompt_text(context_blocks), used_sources
 
 
 async def _demo() -> None:

@@ -24,7 +24,7 @@ SOURCES = [{"title": "Drop calendar", "url": "https://www.sjsu.edu/ue/drops/cale
 RAG = "Context:\n[1] Drop calendar - https://www.sjsu.edu/ue/drops/calendar.php\nLast day to drop: Sep 15."
 
 
-async def _rag(messages, audience=None):
+async def _rag(messages, audience=None, **_kw):
     return RAG, SOURCES
 
 

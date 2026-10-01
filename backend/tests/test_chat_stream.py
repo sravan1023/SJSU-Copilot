@@ -52,7 +52,7 @@ def _check(label, cond, detail=""):
         print(f"  FAIL {label}  {detail}")
 
 
-async def _slow_rag(messages, audience=None):
+async def _slow_rag(messages, audience=None, **_kw):
     await asyncio.sleep(RAG_DELAY)
     return "CONTEXT", [{"title": "SJSU", "url": "https://sjsu.edu"}]
 
@@ -238,7 +238,7 @@ def test_request_id_echoed_in_header():
     print("\n[1.3] X-Request-Id echoes a client-supplied id")
     client = TestClient(main.app)
 
-    async def _fast_rag(messages, audience=None):
+    async def _fast_rag(messages, audience=None, **_kw):
         return None, []
 
     with patch("routers.chat.build_rag_prompt", _fast_rag), \
@@ -283,7 +283,7 @@ def test_generation_failure_yields_error_frame():
     print("\n[2.2] a crash during generation ends the stream with an error frame")
     client = TestClient(main.app)
 
-    async def _fast_rag(messages, audience=None):
+    async def _fast_rag(messages, audience=None, **_kw):
         return None, []
 
     async def _boom_stream(**kwargs):
@@ -318,7 +318,7 @@ def test_request_bounds():
 
     # If a bound leaked through to the handler these would call the real
     # pipeline, so patch it to something that would be obvious in the output.
-    async def _should_not_run(messages, audience=None):
+    async def _should_not_run(messages, audience=None, **_kw):
         raise AssertionError("handler ran for a request that should have been rejected")
 
     with patch("routers.chat.build_rag_prompt", _should_not_run):

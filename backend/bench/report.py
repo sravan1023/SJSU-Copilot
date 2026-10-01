@@ -30,6 +30,11 @@ CLIENT_METRICS = {
 SERVER_STAGES = {
     "behavior_compute": "behaviour settings",
     "rag.total": "retrieval, total",
+    # The knowledge-base lookup. Present but always zero while
+    # KB_RETRIEVAL_ENABLED is false, which is what makes the A/B readable: the
+    # before run must show no row here and the after run must, or the two runs
+    # differed in something other than the flag.
+    "rag.kb": "knowledge base lookup",
     "rag.rewrite": "query rewrite",
     "rag.search.gather": "search (both, wall)",
     "rag.crawl.total": "page fetch (wall)",
