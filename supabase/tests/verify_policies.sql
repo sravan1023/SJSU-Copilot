@@ -361,6 +361,55 @@ BEGIN
   ELSE RAISE NOTICE '  FAIL chat_messages still exists'; END IF;
 END $$;
 
+-- search_documents_fts declared `rank double precision` while ts_rank_cd returns
+-- `real`, so the first matching row raised 42804. The defect was unobservable
+-- for as long as the table was empty: an empty result set produces no tuple, so
+-- nothing is ever type-checked. 20260930000100 fixed it, and this is the only
+-- place the fix is provable -- it needs a row that actually matches.
+DO $$
+DECLARE doc_id uuid; hits int;
+BEGIN
+  INSERT INTO public.documents (title, url, source, visibility, collection)
+    VALUES ('Visitor parking', 'https://example.invalid/kb/parking', 'sjsu.edu', 'public', 'guest')
+    RETURNING id INTO doc_id;
+  INSERT INTO public.document_chunks (document_id, chunk_index, heading, content)
+    VALUES (doc_id, 0, 'Parking', 'Visitor parking is available in the North Garage.');
+
+  SELECT count(*) INTO hits FROM public.search_documents_fts('parking', 5);
+  IF hits >= 1 THEN
+    RAISE NOTICE '  ok   search_documents_fts returns a matching row (42804 fixed)';
+  ELSE
+    RAISE NOTICE '  FAIL search_documents_fts matched nothing for an indexed term';
+  END IF;
+EXCEPTION WHEN others THEN
+  RAISE NOTICE '  FAIL search_documents_fts raised: %', substr(sqlerrm, 1, 65);
+END $$;
+
+-- The generated tsv exists and the GIN index is there to serve it. Without the
+-- index the function still works and silently seq-scans the whole corpus.
+DO $$
+DECLARE missing text[] := '{}';
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'document_chunks'
+                    AND column_name = 'tsv' AND is_generated = 'ALWAYS')
+    THEN missing := missing || 'document_chunks.tsv (generated)'::text; END IF;
+  IF to_regclass('public.idx_document_chunks_tsv') IS NULL
+    THEN missing := missing || 'idx_document_chunks_tsv'::text; END IF;
+  IF to_regclass('public.uq_document_chunks_doc_idx') IS NULL
+    THEN missing := missing || 'uq_document_chunks_doc_idx'::text; END IF;
+  IF to_regclass('public.uq_documents_url') IS NULL
+    THEN missing := missing || 'uq_documents_url'::text; END IF;
+  IF to_regclass('public.idx_document_chunks_embedding_hnsw') IS NULL
+    THEN missing := missing || 'idx_document_chunks_embedding_hnsw'::text; END IF;
+  -- The empty-table ivfflat index had meaningless centroids and had to go.
+  IF to_regclass('public.idx_document_chunks_embedding') IS NOT NULL
+    THEN missing := missing || 'ivfflat index still present'::text; END IF;
+  IF cardinality(missing) = 0 THEN
+    RAISE NOTICE '  ok   kb indexes are as 20260930000100 leaves them';
+  ELSE RAISE NOTICE '  FAIL kb index problems: %', array_to_string(missing, ', '); END IF;
+END $$;
+
 \echo ''
 \echo '=== 14. user_affiliations: users declare, never verify ==='
 select pg_temp.expect('alice declares her own affiliation',
@@ -583,6 +632,30 @@ select pg_temp.expect('anon executes get_memory_context',
 select pg_temp.expect('anon executes match_documents',
   $q$select public.match_documents(array_fill(0.0::real, array[1536])::public.vector, 1, 0.5)$q$,
   true, 'anon');
+-- The four functions 20260930000100 creates or recreates. Deny-by-default is
+-- aspirational without an assertion per function: measured on this image, a new
+-- function in public still carries EXECUTE to PUBLIC despite
+-- 20260918000100's default-privileges change, so each one is revoked by hand and
+-- each revoke is checked here.
+select pg_temp.expect('anon executes search_documents_fts',
+  $q$select * from public.search_documents_fts('parking', 1)$q$,
+  true, 'anon');
+select pg_temp.expect('anon executes search_kb_chunks',
+  $q$select * from public.search_kb_chunks('parking', 'guest', false, 1)$q$,
+  true, 'anon');
+select pg_temp.expect('anon executes match_kb_hybrid',
+  $q$select * from public.match_kb_hybrid('parking', null, 'guest', false, 1, 60)$q$,
+  true, 'anon');
+select pg_temp.expect('anon executes replace_document_chunks',
+  $q$select public.replace_document_chunks('00000000-0000-0000-0000-000000000000'::uuid, '[]'::jsonb)$q$,
+  true, 'anon');
+select pg_temp.expect('alice executes search_kb_chunks',
+  $q$select * from public.search_kb_chunks('parking', 'student', true, 1)$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('alice executes replace_document_chunks',
+  $q$select public.replace_document_chunks('00000000-0000-0000-0000-000000000000'::uuid, '[]'::jsonb)$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+
 select pg_temp.expect('anon executes generate_job_dedupe_hash',
   $q$select public.generate_job_dedupe_hash('t', 'c')$q$,
   true, 'anon');
@@ -698,4 +771,172 @@ BEGIN
 EXCEPTION WHEN others THEN
   PERFORM set_config('role', 'postgres', true);
   RAISE NOTICE '  FAIL service_role insert into job_listings broke: %', substr(sqlerrm, 1, 65);
+END $$;
+
+\echo ''
+\echo '=== 22. Knowledge base visibility (20260930000100) ==='
+-- Two independent boundaries guard the same rule, and both are tested here
+-- because neither covers the other:
+--
+--   * RLS on documents/document_chunks -- what a browser reading through
+--     PostgREST would see. Not what the chat path uses.
+--   * `p_include_authenticated` inside search_kb_chunks/match_kb_hybrid -- what
+--     the chat path actually relies on, because the backend reads with the
+--     service key and service_role bypasses RLS entirely.
+--
+-- Testing only the policies would leave the real control unverified; testing
+-- only the function would leave `visibility` as a backend convention rather than
+-- a database boundary.
+
+-- Fixtures: one document per visibility, each with one matching chunk.
+DO $$
+DECLARE pub_id uuid; auth_id uuid; res_id uuid;
+BEGIN
+  INSERT INTO public.documents (title, url, source, visibility, collection, audience_tags)
+    VALUES ('KB public doc', 'https://example.invalid/kbvis/pub', 'sjsu.edu', 'public', 'guest', '{guest}')
+    RETURNING id INTO pub_id;
+  INSERT INTO public.documents (title, url, source, visibility, collection, audience_tags)
+    VALUES ('KB authenticated doc', 'https://example.invalid/kbvis/auth', 'sjsu.edu', 'authenticated', 'student', '{student}')
+    RETURNING id INTO auth_id;
+  INSERT INTO public.documents (title, url, source, visibility, collection, audience_tags)
+    VALUES ('KB restricted doc', 'https://example.invalid/kbvis/res', 'sjsu.edu', 'restricted', 'faculty', '{faculty}')
+    RETURNING id INTO res_id;
+
+  INSERT INTO public.document_chunks (document_id, chunk_index, heading, content) VALUES
+    (pub_id,  0, 'Shuttle', 'The campus shuttle runs every fifteen minutes.'),
+    (auth_id, 0, 'Shuttle', 'The campus shuttle schedule for enrolled students.'),
+    (res_id,  0, 'Shuttle', 'The campus shuttle contract and internal costings.');
+END $$;
+
+-- RLS: anon sees only public, a signed-in user also sees authenticated, and
+-- neither ever sees restricted.
+select pg_temp.expect_rows('anon reads only public documents',
+  $q$select 1 from public.documents where url like 'https://example.invalid/kbvis/%'$q$, 1, 'anon');
+select pg_temp.expect_rows('alice reads public + authenticated documents',
+  $q$select 1 from public.documents where url like 'https://example.invalid/kbvis/%'$q$, 2,
+  'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('anon reads only public chunks',
+  $q$select 1 from public.document_chunks where heading = 'Shuttle'$q$, 1, 'anon');
+select pg_temp.expect_rows('alice reads public + authenticated chunks',
+  $q$select 1 from public.document_chunks where heading = 'Shuttle'$q$, 2,
+  'authenticated', '11111111-1111-1111-1111-111111111111');
+
+-- The corpus is server-written. There is no insert/update/delete policy on
+-- either table, so RLS denies every write no matter who asks.
+select pg_temp.expect('anon inserts a document',
+  $q$insert into public.documents (title, url) values ('forged', 'https://example.invalid/kbvis/forged')$q$,
+  true, 'anon');
+select pg_temp.expect('alice inserts a document',
+  $q$insert into public.documents (title, url) values ('forged', 'https://example.invalid/kbvis/forged2')$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('alice relabels a restricted document as public',
+  $q$update public.documents set visibility = 'public' where url = 'https://example.invalid/kbvis/res'$q$, 0,
+  'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('alice deletes a chunk',
+  $q$delete from public.document_chunks where heading = 'Shuttle'$q$, 0,
+  'authenticated', '11111111-1111-1111-1111-111111111111');
+
+-- Operator state: RLS enabled with zero policies, so nobody but service_role
+-- sees a row. These tables carry the crawl allowlist, so a user who could write
+-- kb_sources could point the crawler anywhere -- the stored-SSRF shape that
+-- 20260916000200 had to remove from job_sources.
+select pg_temp.expect_rows('anon reads kb_sources',
+  $q$select 1 from public.kb_sources$q$, 0, 'anon');
+select pg_temp.expect_rows('alice reads kb_sources',
+  $q$select 1 from public.kb_sources$q$, 0,
+  'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect('alice inserts a crawl seed',
+  $q$insert into public.kb_sources (url, collection) values ('http://169.254.169.254/', 'guest')$q$,
+  true, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('alice reads kb_ingest_runs',
+  $q$select 1 from public.kb_ingest_runs$q$, 0,
+  'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('alice reads kb_ingest_jobs',
+  $q$select 1 from public.kb_ingest_jobs$q$, 0,
+  'authenticated', '11111111-1111-1111-1111-111111111111');
+
+-- The boundary the chat path actually depends on. Run as postgres, because that
+-- is the situation the backend is in: RLS bypassed, so the only thing standing
+-- between a guest and an authenticated-only document is this parameter.
+DO $$
+DECLARE as_guest int; as_user int; restricted_leak int;
+BEGIN
+  SELECT count(*) INTO as_guest
+    FROM public.search_kb_chunks('shuttle', 'guest', false, 10);
+  SELECT count(*) INTO as_user
+    FROM public.search_kb_chunks('shuttle', 'student', true, 10);
+  SELECT count(*) INTO restricted_leak
+    FROM public.search_kb_chunks('shuttle', 'faculty', true, 10) r
+   WHERE r.url = 'https://example.invalid/kbvis/res';
+
+  IF as_guest = 1 THEN
+    RAISE NOTICE '  ok   search_kb_chunks(include_authenticated => false) returns public only';
+  ELSE
+    RAISE NOTICE '  FAIL guest view returned % rows, expected 1', as_guest;
+  END IF;
+
+  IF as_user = 2 THEN
+    RAISE NOTICE '  ok   search_kb_chunks(include_authenticated => true) adds authenticated';
+  ELSE
+    RAISE NOTICE '  FAIL user view returned % rows, expected 2', as_user;
+  END IF;
+
+  -- restricted is reachable by nobody, through any parameter combination.
+  IF restricted_leak = 0 THEN
+    RAISE NOTICE '  ok   restricted documents are unreachable through search_kb_chunks';
+  ELSE
+    RAISE NOTICE '  FAIL a restricted document leaked into search_kb_chunks';
+  END IF;
+END $$;
+
+-- match_kb_hybrid must enforce the same rule. Called with a null embedding, so
+-- the vector arm drops out and this exercises the keyword arm plus the filter --
+-- which is exactly the state the corpus is in before any embedding is written.
+DO $$
+DECLARE as_guest int; as_user int;
+BEGIN
+  SELECT count(*) INTO as_guest
+    FROM public.match_kb_hybrid('shuttle', null, 'guest', false, 10, 60);
+  SELECT count(*) INTO as_user
+    FROM public.match_kb_hybrid('shuttle', null, 'student', true, 10, 60);
+  IF as_guest = 1 AND as_user = 2 THEN
+    RAISE NOTICE '  ok   match_kb_hybrid enforces the same visibility rule';
+  ELSE
+    RAISE NOTICE '  FAIL match_kb_hybrid visibility: guest=%, user=% (expected 1, 2)', as_guest, as_user;
+  END IF;
+END $$;
+
+-- replace_document_chunks is the only write path, and it has to be atomic:
+-- over PostgREST a delete followed by an insert is two requests, and a crash
+-- between them leaves a document present, hashed and chunkless.
+DO $$
+DECLARE doc_id uuid; written int; final_count int;
+BEGIN
+  SELECT id INTO doc_id FROM public.documents WHERE url = 'https://example.invalid/kbvis/pub';
+
+  SELECT public.replace_document_chunks(doc_id, $json$[
+    {"chunk_index": 0, "heading": "Shuttle", "content": "Replaced chunk zero.", "token_count": 4},
+    {"chunk_index": 1, "heading": "Shuttle", "content": "Replaced chunk one.", "token_count": 4}
+  ]$json$::jsonb) INTO written;
+
+  SELECT count(*) INTO final_count FROM public.document_chunks WHERE document_id = doc_id;
+
+  IF written = 2 AND final_count = 2 THEN
+    RAISE NOTICE '  ok   replace_document_chunks replaces rather than appends';
+  ELSE
+    RAISE NOTICE '  FAIL replace_document_chunks wrote %, left % rows', written, final_count;
+  END IF;
+END $$;
+
+-- The generated tsv must track a replacement, or a re-ingested page stays
+-- findable only by its old text.
+DO $$
+DECLARE hits int;
+BEGIN
+  SELECT count(*) INTO hits FROM public.search_kb_chunks('replaced', 'guest', false, 10);
+  IF hits >= 1 THEN
+    RAISE NOTICE '  ok   the generated tsv reflects replaced content';
+  ELSE
+    RAISE NOTICE '  FAIL replaced content is not searchable';
+  END IF;
 END $$;
