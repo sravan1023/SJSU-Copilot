@@ -290,6 +290,63 @@ $$;
 ALTER FUNCTION "public"."match_documents"("query_embedding" "public"."vector", "match_count" integer, "match_threshold" double precision) OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."match_kb_hybrid"("query_text" "text", "query_embedding" "public"."vector" DEFAULT NULL::"public"."vector", "p_audience" "text" DEFAULT NULL::"text", "p_include_authenticated" boolean DEFAULT false, "match_count" integer DEFAULT 10, "rrf_k" integer DEFAULT 60) RETURNS TABLE("document_id" "uuid", "chunk_index" integer, "heading" "text", "content" "text", "title" "text", "url" "text", "source" "text", "collection" "text", "audience_tags" "text"[], "rank" real, "fetched_at" timestamp with time zone, "last_verified_at" timestamp with time zone, "valid_until" "date")
+    LANGUAGE "sql" STABLE
+    AS $$
+  with visible as (
+    select dc.id, dc.document_id, dc.chunk_index, dc.heading, dc.content,
+           dc.tsv, dc.embedding,
+           d.title, d.url, d.source, d.collection, d.audience_tags,
+           d.fetched_at, d.last_verified_at, d.valid_until
+      from public.document_chunks dc
+      join public.documents d on d.id = dc.document_id
+     where d.visibility = 'public'
+        or (p_include_authenticated and d.visibility = 'authenticated')
+  ),
+  q as (
+    select websearch_to_tsquery('english', coalesce(query_text, '')) as tsq
+  ),
+  keyword as (
+    select v.id,
+           row_number() over (order by ts_rank_cd(v.tsv, q.tsq) desc) as pos
+      from visible v, q
+     where q.tsq is not null
+       and numnode(q.tsq) > 0
+       and v.tsv @@ q.tsq
+     limit greatest(match_count * 4, 40)
+  ),
+  semantic as (
+    select v.id,
+           row_number() over (order by v.embedding <=> query_embedding) as pos
+      from visible v
+     where query_embedding is not null
+       and v.embedding is not null
+     limit greatest(match_count * 4, 40)
+  ),
+  fused as (
+    select coalesce(k.id, s.id) as id,
+           coalesce(1.0 / (rrf_k + k.pos), 0.0)
+             + coalesce(1.0 / (rrf_k + s.pos), 0.0) as score
+      from keyword k
+      full outer join semantic s on s.id = k.id
+  )
+  select v.document_id, v.chunk_index, v.heading, v.content,
+         v.title, v.url, v.source, v.collection, v.audience_tags,
+         f.score::real as rank,
+         v.fetched_at, v.last_verified_at, v.valid_until
+    from fused f
+    join visible v on v.id = f.id
+   order by
+     (p_audience is not null and p_audience = any (v.audience_tags)) desc,
+     f.score desc,
+     v.last_verified_at desc nulls last
+   limit match_count;
+$$;
+
+
+ALTER FUNCTION "public"."match_kb_hybrid"("query_text" "text", "query_embedding" "public"."vector", "p_audience" "text", "p_include_authenticated" boolean, "match_count" integer, "rrf_k" integer) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."pipeline_state_set_updated_at"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     AS $$
@@ -339,10 +396,54 @@ $$;
 ALTER FUNCTION "public"."promote_memory_to_project"("p_memory_id" "uuid", "p_project_id" "uuid") OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."search_documents_fts"("query_text" "text", "match_count" integer DEFAULT 5) RETURNS TABLE("id" "uuid", "document_id" "uuid", "chunk_index" integer, "content" "text", "metadata" "jsonb", "title" "text", "url" "text", "source" "text", "document_type" "text", "rank" double precision, "last_verified_at" timestamp with time zone)
+CREATE OR REPLACE FUNCTION "public"."replace_document_chunks"("p_document_id" "uuid", "p_chunks" "jsonb") RETURNS integer
+    LANGUAGE "plpgsql"
+    AS $$
+declare
+  written integer;
+begin
+  delete from public.document_chunks where document_id = p_document_id;
+
+  insert into public.document_chunks
+    (document_id, chunk_index, heading, content, token_count, embedding, metadata)
+  select
+    p_document_id,
+    (c->>'chunk_index')::int,
+    c->>'heading',
+    c->>'content',
+    nullif(c->>'token_count', '')::int,
+    case
+      when c->'embedding' is null or c->'embedding' = 'null'::jsonb then null
+      else (c->>'embedding')::vector
+    end,
+    coalesce(c->'metadata', '{}'::jsonb)
+  from jsonb_array_elements(coalesce(p_chunks, '[]'::jsonb)) as c;
+
+  get diagnostics written = row_count;
+  return written;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."replace_document_chunks"("p_document_id" "uuid", "p_chunks" "jsonb") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."search_documents_fts"("query_text" "text", "match_count" integer DEFAULT 5) RETURNS TABLE("id" "uuid", "document_id" "uuid", "chunk_index" integer, "content" "text", "metadata" "jsonb", "title" "text", "url" "text", "source" "text", "document_type" "text", "rank" real, "last_verified_at" timestamp with time zone)
     LANGUAGE "plpgsql" STABLE
     AS $$
+declare
+  q tsquery := websearch_to_tsquery('english', coalesce(query_text, ''));
 begin
+  -- websearch_to_tsquery yields an empty tsquery for input that is all stop
+  -- words or punctuation, and `@@` against it matches nothing. Skip the scan.
+  --
+  -- numnode(), not `q = ''::tsquery`: the comparison parses an empty string,
+  -- and the parser raises `NOTICE: text-search query doesn't contain lexemes`
+  -- every time. This runs on every chat turn, so the guard has to be silent.
+  if q is null or numnode(q) = 0 then
+    return;
+  end if;
+
   return query
     select
       dc.id,
@@ -354,22 +455,64 @@ begin
       d.url,
       d.source,
       d.document_type,
-      ts_rank_cd(
-        to_tsvector('english', coalesce(dc.content, '') || ' ' || coalesce(d.title, '') || ' ' || coalesce(d.source, '')),
-        websearch_to_tsquery('english', query_text)
-      ) as rank,
+      ts_rank_cd(dc.tsv, q) as rank,
       d.last_verified_at
     from public.document_chunks dc
     join public.documents d on d.id = dc.document_id
-    where to_tsvector('english', coalesce(dc.content, '') || ' ' || coalesce(d.title, '') || ' ' || coalesce(d.source, ''))
-      @@ websearch_to_tsquery('english', query_text)
-    order by rank desc, d.last_verified_at desc nulls last
+    where dc.tsv @@ q
+    order by ts_rank_cd(dc.tsv, q) desc, d.last_verified_at desc nulls last
     limit match_count;
 end;
 $$;
 
 
 ALTER FUNCTION "public"."search_documents_fts"("query_text" "text", "match_count" integer) OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."search_kb_chunks"("query_text" "text", "p_audience" "text" DEFAULT NULL::"text", "p_include_authenticated" boolean DEFAULT false, "match_count" integer DEFAULT 10) RETURNS TABLE("document_id" "uuid", "chunk_index" integer, "heading" "text", "content" "text", "title" "text", "url" "text", "source" "text", "collection" "text", "audience_tags" "text"[], "rank" real, "fetched_at" timestamp with time zone, "last_verified_at" timestamp with time zone, "valid_until" "date")
+    LANGUAGE "plpgsql" STABLE
+    AS $$
+declare
+  q tsquery := websearch_to_tsquery('english', coalesce(query_text, ''));
+begin
+  if q is null or numnode(q) = 0 then
+    return;
+  end if;
+
+  return query
+    select
+      dc.document_id,
+      dc.chunk_index,
+      dc.heading,
+      dc.content,
+      d.title,
+      d.url,
+      d.source,
+      d.collection,
+      d.audience_tags,
+      ts_rank_cd(dc.tsv, q) as rank,
+      d.fetched_at,
+      d.last_verified_at,
+      d.valid_until
+    from public.document_chunks dc
+    join public.documents d on d.id = dc.document_id
+    where dc.tsv @@ q
+      and (
+        d.visibility = 'public'
+        or (p_include_authenticated and d.visibility = 'authenticated')
+      )
+    -- audience_tags is a boost, never a filter: a public page tagged for faculty
+    -- is still the right answer to a student's question about it.
+    order by
+      (p_audience is not null and p_audience = any (d.audience_tags)) desc,
+      ts_rank_cd(dc.tsv, q) desc,
+      d.last_verified_at desc nulls last
+    limit match_count;
+end;
+$$;
+
+
+ALTER FUNCTION "public"."search_kb_chunks"("query_text" "text", "p_audience" "text", "p_include_authenticated" boolean, "match_count" integer) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."set_conversation_preview"() RETURNS "trigger"
@@ -550,9 +693,12 @@ CREATE TABLE IF NOT EXISTS "public"."document_chunks" (
     "document_id" "uuid" NOT NULL,
     "chunk_index" integer NOT NULL,
     "content" "text" NOT NULL,
-    "embedding" "public"."vector"(1536),
+    "embedding" "public"."vector"(768),
     "metadata" "jsonb" DEFAULT '{}'::"jsonb",
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "heading" "text",
+    "token_count" integer,
+    "tsv" "tsvector" GENERATED ALWAYS AS ("to_tsvector"('"english"'::"regconfig", ((COALESCE("heading", ''::"text") || ' '::"text") || COALESCE("content", ''::"text")))) STORED
 );
 
 
@@ -563,16 +709,34 @@ CREATE TABLE IF NOT EXISTS "public"."documents" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "source" "text",
     "title" "text" NOT NULL,
-    "url" "text",
+    "url" "text" NOT NULL,
     "document_type" "text",
     "metadata" "jsonb" DEFAULT '{}'::"jsonb",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "last_verified_at" timestamp with time zone,
-    "content_hash" "text"
+    "content_hash" "text",
+    "collection" "text",
+    "audience_tags" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    "visibility" "text" DEFAULT 'public'::"text" NOT NULL,
+    "fetched_at" timestamp with time zone,
+    "etag" "text",
+    "last_modified" "text",
+    "version" integer DEFAULT 1 NOT NULL,
+    "valid_from" "date",
+    "valid_until" "date",
+    CONSTRAINT "documents_visibility_check" CHECK (("visibility" = ANY (ARRAY['public'::"text", 'authenticated'::"text", 'restricted'::"text"])))
 );
 
 
 ALTER TABLE "public"."documents" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."documents"."audience_tags" IS 'Relevance only -- a soft ranking boost. Never an access control decision.';
+
+
+
+COMMENT ON COLUMN "public"."documents"."visibility" IS 'Access control. Enforced in RLS and in search_kb_chunks/match_kb_hybrid.';
+
 
 
 CREATE TABLE IF NOT EXISTS "public"."job_fetch_runs" (
@@ -666,6 +830,66 @@ ALTER TABLE "public"."jobs_snapshot" ALTER COLUMN "id" ADD GENERATED ALWAYS AS I
     CACHE 1
 );
 
+
+
+CREATE TABLE IF NOT EXISTS "public"."kb_ingest_jobs" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "source_id" "uuid" NOT NULL,
+    "status" "text" DEFAULT 'pending'::"text" NOT NULL,
+    "attempts" integer DEFAULT 0 NOT NULL,
+    "locked_by" "text",
+    "locked_until" timestamp with time zone,
+    "error" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "kb_ingest_jobs_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'running'::"text", 'done'::"text", 'failed'::"text"])))
+);
+
+
+ALTER TABLE "public"."kb_ingest_jobs" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."kb_ingest_runs" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "source_id" "uuid",
+    "status" "text" NOT NULL,
+    "pages_fetched" integer DEFAULT 0 NOT NULL,
+    "pages_unchanged" integer DEFAULT 0 NOT NULL,
+    "pages_skipped" integer DEFAULT 0 NOT NULL,
+    "skip_reasons" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "documents_written" integer DEFAULT 0 NOT NULL,
+    "chunks_written" integer DEFAULT 0 NOT NULL,
+    "embed_tokens" integer DEFAULT 0 NOT NULL,
+    "error_message" "text",
+    "started_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "completed_at" timestamp with time zone,
+    CONSTRAINT "kb_ingest_runs_status_check" CHECK (("status" = ANY (ARRAY['success'::"text", 'failed'::"text", 'partial'::"text"])))
+);
+
+
+ALTER TABLE "public"."kb_ingest_runs" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."kb_sources" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "url" "text" NOT NULL,
+    "collection" "text" NOT NULL,
+    "audience_tags" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    "visibility" "text" DEFAULT 'public'::"text" NOT NULL,
+    "crawl_depth" integer DEFAULT 0 NOT NULL,
+    "allow_hosts" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    "max_pages" integer DEFAULT 40 NOT NULL,
+    "enabled" boolean DEFAULT true NOT NULL,
+    "fetch_interval_minutes" integer DEFAULT 10080 NOT NULL,
+    "last_fetched_at" timestamp with time zone,
+    "last_status" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "kb_sources_crawl_depth_check" CHECK ((("crawl_depth" >= 0) AND ("crawl_depth" <= 2))),
+    CONSTRAINT "kb_sources_visibility_check" CHECK (("visibility" = ANY (ARRAY['public'::"text", 'authenticated'::"text", 'restricted'::"text"])))
+);
+
+
+ALTER TABLE "public"."kb_sources" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."memories" (
@@ -976,6 +1200,26 @@ ALTER TABLE ONLY "public"."jobs_snapshot"
 
 
 
+ALTER TABLE ONLY "public"."kb_ingest_jobs"
+    ADD CONSTRAINT "kb_ingest_jobs_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."kb_ingest_runs"
+    ADD CONSTRAINT "kb_ingest_runs_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."kb_sources"
+    ADD CONSTRAINT "kb_sources_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."kb_sources"
+    ADD CONSTRAINT "kb_sources_url_key" UNIQUE ("url");
+
+
+
 ALTER TABLE ONLY "public"."memories"
     ADD CONSTRAINT "memories_pkey" PRIMARY KEY ("id");
 
@@ -1086,7 +1330,11 @@ CREATE INDEX "idx_conversations_user_updated" ON "public"."conversations" USING 
 
 
 
-CREATE INDEX "idx_document_chunks_embedding" ON "public"."document_chunks" USING "ivfflat" ("embedding" "public"."vector_cosine_ops") WITH ("lists"='100');
+CREATE INDEX "idx_document_chunks_embedding_hnsw" ON "public"."document_chunks" USING "hnsw" ("embedding" "public"."vector_cosine_ops") WITH ("m"='16', "ef_construction"='64');
+
+
+
+CREATE INDEX "idx_document_chunks_tsv" ON "public"."document_chunks" USING "gin" ("tsv");
 
 
 
@@ -1138,6 +1386,18 @@ CREATE INDEX "idx_jobs_snapshot_run_rank" ON "public"."jobs_snapshot" USING "btr
 
 
 
+CREATE INDEX "idx_kb_ingest_jobs_claimable" ON "public"."kb_ingest_jobs" USING "btree" ("created_at") WHERE ("status" = ANY (ARRAY['pending'::"text", 'running'::"text"]));
+
+
+
+CREATE INDEX "idx_kb_ingest_runs_started_at" ON "public"."kb_ingest_runs" USING "btree" ("started_at" DESC);
+
+
+
+CREATE INDEX "idx_kb_sources_due" ON "public"."kb_sources" USING "btree" ("last_fetched_at" NULLS FIRST) WHERE "enabled";
+
+
+
 CREATE INDEX "idx_memories_conversation" ON "public"."memories" USING "btree" ("conversation_id", "status", "importance" DESC) WHERE (("scope" = 'conversation'::"public"."memory_scope") AND ("status" = 'active'::"public"."memory_status"));
 
 
@@ -1178,6 +1438,14 @@ CREATE UNIQUE INDEX "uq_behavior_settings_scope_idx" ON "public"."behavior_setti
 
 
 
+CREATE UNIQUE INDEX "uq_document_chunks_doc_idx" ON "public"."document_chunks" USING "btree" ("document_id", "chunk_index");
+
+
+
+CREATE UNIQUE INDEX "uq_documents_url" ON "public"."documents" USING "btree" ("url");
+
+
+
 CREATE OR REPLACE TRIGGER "on_academic_records_updated" BEFORE UPDATE ON "public"."student_academic_records" FOR EACH ROW EXECUTE FUNCTION "public"."handle_updated_at"();
 
 
@@ -1187,6 +1455,10 @@ CREATE OR REPLACE TRIGGER "on_conversations_updated" BEFORE UPDATE ON "public"."
 
 
 CREATE OR REPLACE TRIGGER "on_job_sources_updated" BEFORE UPDATE ON "public"."job_sources" FOR EACH ROW EXECUTE FUNCTION "public"."handle_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "on_kb_ingest_jobs_updated" BEFORE UPDATE ON "public"."kb_ingest_jobs" FOR EACH ROW EXECUTE FUNCTION "public"."handle_updated_at"();
 
 
 
@@ -1304,6 +1576,16 @@ ALTER TABLE ONLY "public"."jobs_snapshot"
 
 
 
+ALTER TABLE ONLY "public"."kb_ingest_jobs"
+    ADD CONSTRAINT "kb_ingest_jobs_source_id_fkey" FOREIGN KEY ("source_id") REFERENCES "public"."kb_sources"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."kb_ingest_runs"
+    ADD CONSTRAINT "kb_ingest_runs_source_id_fkey" FOREIGN KEY ("source_id") REFERENCES "public"."kb_sources"("id") ON DELETE SET NULL;
+
+
+
 ALTER TABLE ONLY "public"."memories"
     ADD CONSTRAINT "memories_conversation_id_fkey" FOREIGN KEY ("conversation_id") REFERENCES "public"."conversations"("id") ON DELETE CASCADE;
 
@@ -1404,14 +1686,6 @@ ALTER TABLE ONLY "public"."user_saved_jobs"
 
 
 
-CREATE POLICY "Authenticated users can read document chunks" ON "public"."document_chunks" FOR SELECT USING (("auth"."role"() = 'authenticated'::"text"));
-
-
-
-CREATE POLICY "Authenticated users can read documents" ON "public"."documents" FOR SELECT USING (("auth"."role"() = 'authenticated'::"text"));
-
-
-
 CREATE POLICY "Authenticated users can read fetch logs" ON "public"."job_fetch_runs" FOR SELECT USING (("auth"."role"() = 'authenticated'::"text"));
 
 
@@ -1421,6 +1695,26 @@ CREATE POLICY "Authenticated users can read job sources" ON "public"."job_source
 
 
 CREATE POLICY "Authenticated users can read jobs" ON "public"."job_listings" FOR SELECT USING (("auth"."role"() = 'authenticated'::"text"));
+
+
+
+CREATE POLICY "Public document chunks are readable by anyone" ON "public"."document_chunks" FOR SELECT TO "authenticated", "anon" USING ((EXISTS ( SELECT 1
+   FROM "public"."documents" "d"
+  WHERE (("d"."id" = "document_chunks"."document_id") AND ("d"."visibility" = 'public'::"text")))));
+
+
+
+CREATE POLICY "Public documents are readable by anyone" ON "public"."documents" FOR SELECT TO "authenticated", "anon" USING (("visibility" = 'public'::"text"));
+
+
+
+CREATE POLICY "Signed-in users also read authenticated document chunks" ON "public"."document_chunks" FOR SELECT TO "authenticated" USING ((EXISTS ( SELECT 1
+   FROM "public"."documents" "d"
+  WHERE (("d"."id" = "document_chunks"."document_id") AND ("d"."visibility" = ANY (ARRAY['public'::"text", 'authenticated'::"text"]))))));
+
+
+
+CREATE POLICY "Signed-in users also read authenticated documents" ON "public"."documents" FOR SELECT TO "authenticated" USING (("visibility" = ANY (ARRAY['public'::"text", 'authenticated'::"text"])));
 
 
 
@@ -1566,6 +1860,15 @@ CREATE POLICY "jobs_snapshot_select_authenticated" ON "public"."jobs_snapshot" F
 
 CREATE POLICY "jobs_snapshot_service_write" ON "public"."jobs_snapshot" TO "service_role" USING (("auth"."role"() = 'service_role'::"text")) WITH CHECK (("auth"."role"() = 'service_role'::"text"));
 
+
+
+ALTER TABLE "public"."kb_ingest_jobs" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."kb_ingest_runs" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."kb_sources" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."memories" ENABLE ROW LEVEL SECURITY;
@@ -1787,6 +2090,11 @@ GRANT ALL ON FUNCTION "public"."match_documents"("query_embedding" "public"."vec
 
 
 
+REVOKE ALL ON FUNCTION "public"."match_kb_hybrid"("query_text" "text", "query_embedding" "public"."vector", "p_audience" "text", "p_include_authenticated" boolean, "match_count" integer, "rrf_k" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."match_kb_hybrid"("query_text" "text", "query_embedding" "public"."vector", "p_audience" "text", "p_include_authenticated" boolean, "match_count" integer, "rrf_k" integer) TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."pipeline_state_set_updated_at"() FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."pipeline_state_set_updated_at"() TO "service_role";
 
@@ -1798,8 +2106,18 @@ GRANT ALL ON FUNCTION "public"."promote_memory_to_project"("p_memory_id" "uuid",
 
 
 
+REVOKE ALL ON FUNCTION "public"."replace_document_chunks"("p_document_id" "uuid", "p_chunks" "jsonb") FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."replace_document_chunks"("p_document_id" "uuid", "p_chunks" "jsonb") TO "service_role";
+
+
+
 REVOKE ALL ON FUNCTION "public"."search_documents_fts"("query_text" "text", "match_count" integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION "public"."search_documents_fts"("query_text" "text", "match_count" integer) TO "service_role";
+
+
+
+REVOKE ALL ON FUNCTION "public"."search_kb_chunks"("query_text" "text", "p_audience" "text", "p_include_authenticated" boolean, "match_count" integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION "public"."search_kb_chunks"("query_text" "text", "p_audience" "text", "p_include_authenticated" boolean, "match_count" integer) TO "service_role";
 
 
 
@@ -1852,14 +2170,14 @@ GRANT ALL ON TABLE "public"."conversations" TO "service_role";
 
 
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."document_chunks" TO "anon";
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."document_chunks" TO "authenticated";
+GRANT SELECT ON TABLE "public"."document_chunks" TO "anon";
+GRANT SELECT ON TABLE "public"."document_chunks" TO "authenticated";
 GRANT ALL ON TABLE "public"."document_chunks" TO "service_role";
 
 
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."documents" TO "anon";
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."documents" TO "authenticated";
+GRANT SELECT ON TABLE "public"."documents" TO "anon";
+GRANT SELECT ON TABLE "public"."documents" TO "authenticated";
 GRANT ALL ON TABLE "public"."documents" TO "service_role";
 
 
@@ -1891,6 +2209,18 @@ GRANT ALL ON TABLE "public"."jobs_snapshot" TO "service_role";
 GRANT SELECT,USAGE ON SEQUENCE "public"."jobs_snapshot_id_seq" TO "anon";
 GRANT SELECT,USAGE ON SEQUENCE "public"."jobs_snapshot_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."jobs_snapshot_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."kb_ingest_jobs" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."kb_ingest_runs" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."kb_sources" TO "service_role";
 
 
 
