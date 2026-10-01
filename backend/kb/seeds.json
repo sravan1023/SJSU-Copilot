@@ -1,0 +1,69 @@
+{
+  "$comment": [
+    "The curated allowlist: which public SJSU pages the knowledge base is built",
+    "from. `python -m kb.ingest --sync-seeds` upserts these into public.kb_sources",
+    "on `url`.",
+    "",
+    "Every URL here returned HTTP 200 with content-type text/html when probed on",
+    "2026-09-30. That matters more than it sounds: plausible-looking paths like",
+    "/faso/how-to-apply/, /bursar/tuition-and-fees/, /scholarships/,",
+    "/parking/visitors/, /tours/ and /maps/ are all 404, and /housing/ is a",
+    "redirect loop. A seed list written from memory would be a third dead links.",
+    "",
+    "Two entries are the redirect *target*, not the path you would guess:",
+    "  /facultyaffairs/ -> /up/        (University Personnel)",
+    "  /ecampus/        -> /cfeti/     (and /ecampus/ is Disallow'd in robots.txt)",
+    "",
+    "crawl_depth is 0 everywhere. SJSU's advertised sitemap (indexmap.txt) is a",
+    "2013-2016 artifact whose per-department sitemaps all 404, so there is no",
+    "cheap discovery mechanism -- and for a corpus this size a human picks better",
+    "pages than a breadth-first crawl does. The column exists for later.",
+    "",
+    "audience_tags is a relevance boost, never an access filter: a page tagged",
+    "`student` is still the right answer to a guest asking about it. Access is",
+    "`visibility`, which is enforced in RLS and in the retrieval functions.",
+    "",
+    "fetch_interval_minutes: 10080 is weekly. catalog.sjsu.edu gets 43200",
+    "(monthly) because its robots.txt sets crawl-delay: 120 -- about 30 pages an",
+    "hour -- so it is an overnight job and must not share a run with the rest."
+  ],
+
+  "sources": [
+    { "url": "https://www.sjsu.edu/registrar/", "collection": "registrar", "audience_tags": ["student"] },
+    { "url": "https://www.sjsu.edu/registrar/calendar/", "collection": "registrar", "audience_tags": ["student", "faculty"] },
+    { "url": "https://www.sjsu.edu/registrar/registration/", "collection": "registrar", "audience_tags": ["student"] },
+    { "url": "https://www.sjsu.edu/registrar/transcripts/", "collection": "registrar", "audience_tags": ["student", "alumni"] },
+    { "url": "https://www.sjsu.edu/classes/", "collection": "registrar", "audience_tags": ["student"] },
+
+    { "url": "https://catalog.sjsu.edu/", "collection": "catalog", "audience_tags": ["student"], "fetch_interval_minutes": 43200, "max_pages": 20 },
+
+    { "url": "https://www.sjsu.edu/admissions/", "collection": "admissions", "audience_tags": ["guest"] },
+    { "url": "https://www.sjsu.edu/admissions/transfer/", "collection": "admissions", "audience_tags": ["guest"] },
+    { "url": "https://www.sjsu.edu/admissions/graduate/", "collection": "admissions", "audience_tags": ["guest"] },
+    { "url": "https://www.sjsu.edu/admissions/impaction/", "collection": "admissions", "audience_tags": ["guest", "student"] },
+    { "url": "https://www.sjsu.edu/admissions/deadlines/", "collection": "admissions", "audience_tags": ["guest"] },
+
+    { "url": "https://www.sjsu.edu/parking/", "collection": "visiting", "audience_tags": ["guest", "student", "faculty"] },
+    { "url": "https://www.sjsu.edu/visit/", "collection": "visiting", "audience_tags": ["guest"] },
+    { "url": "https://www.sjsu.edu/about/", "collection": "visiting", "audience_tags": ["guest"] },
+
+    { "url": "https://www.sjsu.edu/faso/", "collection": "financial-aid", "audience_tags": ["student"] },
+    { "url": "https://www.sjsu.edu/faso/types-of-aid/", "collection": "financial-aid", "audience_tags": ["student"] },
+    { "url": "https://www.sjsu.edu/bursar/", "collection": "financial-aid", "audience_tags": ["student"] },
+
+    { "url": "https://www.sjsu.edu/advising/", "collection": "student-services", "audience_tags": ["student"] },
+    { "url": "https://www.sjsu.edu/isss/", "collection": "student-services", "audience_tags": ["student"] },
+    { "url": "https://www.sjsu.edu/isss/current-students/", "collection": "student-services", "audience_tags": ["student"] },
+    { "url": "https://careercenter.sjsu.edu/", "collection": "student-services", "audience_tags": ["student", "alumni"] },
+    { "url": "https://library.sjsu.edu/", "collection": "student-services", "audience_tags": ["student", "faculty"] },
+    { "url": "https://www.sjsu.edu/wellness/", "collection": "student-services", "audience_tags": ["student"] },
+
+    { "url": "https://www.sjsu.edu/alumni/", "collection": "alumni", "audience_tags": ["alumni"] },
+
+    { "url": "https://www.sjsu.edu/up/", "collection": "faculty", "audience_tags": ["faculty"] },
+    { "url": "https://www.sjsu.edu/provost/", "collection": "faculty", "audience_tags": ["faculty"] },
+    { "url": "https://www.sjsu.edu/research/", "collection": "faculty", "audience_tags": ["faculty"] },
+    { "url": "https://www.sjsu.edu/senate/", "collection": "faculty", "audience_tags": ["faculty"] },
+    { "url": "https://www.sjsu.edu/cfeti/", "collection": "faculty", "audience_tags": ["faculty"] }
+  ]
+}
