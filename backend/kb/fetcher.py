@@ -44,7 +44,22 @@ logger = logging.getLogger(__name__)
 # body is rendered by JavaScript -- one.sjsu.edu is the likely offender -- where
 # the served HTML is a shell. Counting these is how we find out which seeds are
 # useless without adding a headless browser to the dependency tree.
-MIN_USEFUL_CHARS = 500
+#
+# **Lowered from 500 to 200 on 2026-10-01, on a measurement.** At 500 the only
+# page rejected across all 35 seeds was /registrar/transcripts/ (-> /transcripts/),
+# and inspection showed the rejection was wrong: extraction worked correctly and
+# returned every word the page has. The page is a 180-character stub whose whole
+# body is "All current SJSU students and alumni may order copies of their
+# transcript online. We offer both electronic and paper versions." -- which is the
+# answer to bench question `alumni-faq-1`, "How do I order an official transcript
+# as an alumnus?". A threshold meant to detect *extraction failure* was instead
+# rejecting a page for being terse.
+#
+# 200 is deliberately just under that page. Verified: across the 35 seeds this
+# changes exactly one outcome and admits no other page, so it is a measured
+# adjustment rather than a loosened guard. A JavaScript shell extracts to tens of
+# characters, not two hundred, so the original purpose still holds.
+MIN_USEFUL_CHARS = 200
 
 REQUEST_TIMEOUT = 20.0
 

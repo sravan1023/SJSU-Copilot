@@ -20,6 +20,7 @@ later rather than to assume permission.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
@@ -80,15 +81,25 @@ class RobotsCache:
 
     client: httpx.AsyncClient
     _hosts: dict[str, HostRules] = field(default_factory=dict)
+    # One lock per host, so concurrent callers collapse into a single fetch.
+    # Without it the first N tasks all miss the cache together and each fetches
+    # robots.txt -- which is both wasteful and, against a host that asked not to
+    # be overloaded, the wrong first impression.
+    _locks: dict[str, asyncio.Lock] = field(default_factory=dict)
 
     async def for_url(self, url: str) -> HostRules:
         host = urlsplit(url).netloc.lower()
         cached = self._hosts.get(host)
         if cached is not None:
             return cached
-        rules = await self._fetch(url, host)
-        self._hosts[host] = rules
-        return rules
+        async with self._locks.setdefault(host, asyncio.Lock()):
+            # Re-check: the holder of the lock before us may have filled it.
+            cached = self._hosts.get(host)
+            if cached is not None:
+                return cached
+            rules = await self._fetch(url, host)
+            self._hosts[host] = rules
+            return rules
 
     async def _fetch(self, url: str, host: str) -> HostRules:
         parts = urlsplit(url)
