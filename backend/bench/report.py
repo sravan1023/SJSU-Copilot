@@ -30,10 +30,11 @@ CLIENT_METRICS = {
 SERVER_STAGES = {
     "behavior_compute": "behaviour settings",
     "rag.total": "retrieval, total",
-    # The knowledge-base lookup. Present but always zero while
-    # KB_RETRIEVAL_ENABLED is false, which is what makes the A/B readable: the
-    # before run must show no row here and the after run must, or the two runs
-    # differed in something other than the flag.
+    # The knowledge-base lookup. Zero whenever KB_RETRIEVAL_ENABLED is false,
+    # which is what makes the A/B readable: the baseline run must show no row here
+    # and the comparison run must, or the two runs differed in something other
+    # than the flag. Since 2026-10-01 the default is *on*, so it is the baseline
+    # run that now needs KB_RETRIEVAL_ENABLED=false set explicitly.
     "rag.kb": "knowledge base lookup",
     "rag.rewrite": "query rewrite",
     "rag.search.gather": "search (both, wall)",

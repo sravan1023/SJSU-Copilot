@@ -33,10 +33,21 @@ from kb.embed import embed_query, to_pgvector
 
 logger = logging.getLogger(__name__)
 
-# Off until stage 4D has measured that it helps. This flag is the entire
-# rollback: with it unset, build_rag_prompt behaves exactly as it did before.
+# **On by default since 2026-10-01**, after stage 4D measured that it helps: 9 of
+# the 10 KB-eligible bench questions retrieve the page that answers them, p50
+# 422ms against 2-6s for live search, assembled context 3.3-5.7k chars against
+# ~8.8k, and the answers were read through and judged good.
+#
+# This flag is still the entire rollback, and it is still read per call, so
+# `KB_RETRIEVAL_ENABLED=false` in the environment restores the pre-Phase-4
+# behaviour exactly, with no deploy and no restart beyond picking up the env.
+#
+# One known failure survives the flip: a question about good academic standing
+# gets a confident answer sourced from /admissions/impaction/, which is about
+# admission GPA thresholds rather than the 2.0 continuation requirement. The fix
+# is the catalog at crawl_depth 1, not a threshold.
 def enabled() -> bool:
-    return os.getenv("KB_RETRIEVAL_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+    return os.getenv("KB_RETRIEVAL_ENABLED", "true").strip().lower() in ("1", "true", "yes")
 
 
 def _num(name: str, default: float) -> float:

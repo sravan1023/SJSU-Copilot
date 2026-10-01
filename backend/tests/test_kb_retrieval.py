@@ -6,9 +6,11 @@ Run from backend/ with:
 
 Two properties matter more than the rest, and they are asserted first:
 
-* **With the flag unset, nothing changes.** `KB_RETRIEVAL_ENABLED=false` is the
-  entire rollback for Phase 4, so it has to be provably inert rather than
-  probably inert.
+* **`KB_RETRIEVAL_ENABLED=false` is the entire rollback for Phase 4**, so it has
+  to be provably inert rather than probably inert. The default flipped to *on* on
+  2026-10-01, which makes this stronger rather than weaker: the off switch is now
+  the only way back to pre-Phase-4 grounding, so it is the thing most worth a
+  test.
 * **A guest never sees `visibility='authenticated'` content.** The backend reads
   with the service key, which bypasses RLS, so `p_include_authenticated` is the
   only thing standing between a visitor and an internal page. Nothing else in the
@@ -51,7 +53,7 @@ MESSAGES = [{"role": "user", "content": "where can visitors park at sjsu"}]
 # ── The flag is the rollback ───────────────────────────────────────────────────
 
 
-def test_the_knowledge_base_is_not_consulted_when_the_flag_is_unset():
+def test_the_knowledge_base_is_not_consulted_when_the_flag_is_off():
     called = False
 
     async def _spy(*a, **kw):
@@ -68,6 +70,19 @@ def test_the_knowledge_base_is_not_consulted_when_the_flag_is_unset():
         asyncio.run(build_rag_prompt(MESSAGES, "guest"))
 
     assert not called, "the flag must make the KB path unreachable, not merely unused"
+
+
+def test_the_default_is_on():
+    """Flipped 2026-10-01, after 4D measured that the corpus helps.
+
+    Asserted because the default is the whole difference between "the knowledge
+    base works on one laptop" and "the knowledge base works". A silent revert to
+    false would look like nothing at all: answers would simply go back to being
+    slower and web-sourced.
+    """
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("KB_RETRIEVAL_ENABLED", None)
+        assert kb_retrieval.enabled() is True
 
 
 def test_enabled_reads_the_env_per_call():
