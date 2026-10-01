@@ -25,9 +25,14 @@ The three failures these exist to prevent, in order of how quietly they break:
 These parse the migrations rather than trusting a hand-copied list, so the
 assertion is against what will actually be applied.
 """
+import json
+import os
+import pathlib
 import re
 import sys
+import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -256,20 +261,41 @@ def test_suggestions_are_usable():
 
 def test_site_filter_shape():
     print("\n[3.3] site: filters are well formed")
-    single = audiences.site_filter("student")
-    _check("a single domain yields a bare site:", single == "site:sjsu.edu", single)
 
-    multi = audiences.site_filter("alumni")
-    _check(
-        "several domains are OR-ed inside parentheses",
-        multi.startswith("(") and " OR " in multi and multi.endswith(")"),
-        multi,
-    )
-    _check(
-        "every collection appears in the filter",
-        all(f"site:{d}" in multi for d in audiences.source_collections("alumni")),
-        multi,
-    )
+    # Every audience currently scopes to sjsu.edu alone. careercenter.sjsu.edu
+    # and library.sjsu.edu are subdomains, which `site:` already covers, so there
+    # is no second registrable domain to list. Alumni briefly carried
+    # sjsualumni.org, which does not resolve at all.
+    for name in audiences.all_audiences():
+        got = audiences.site_filter(name)
+        _check(f"{name} yields a bare site: filter", got == "site:sjsu.edu", got)
+
+    _check("an unknown audience still produces a filter",
+           audiences.site_filter("nonsense") == "site:sjsu.edu")
+
+
+def test_site_filter_ors_several_domains():
+    print("\n[3.4] several collections are OR-ed inside parentheses")
+
+    # The multi-domain path has no user in the shipped config, so it is exercised
+    # against a fixture rather than by putting a domain nobody owns into
+    # audiences.json. That is exactly how the sjsualumni.org mistake survived: a
+    # test asserted behaviour for a non-existent domain and passed, because
+    # site_filter and rank_sources are pure string handling.
+    base = json.loads(audiences.config_path().read_text(encoding="utf-8"))
+    base["audiences"]["student"]["sourceCollections"] = ["sjsu.edu", "example.test"]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture = pathlib.Path(tmp) / "audiences.json"
+        fixture.write_text(json.dumps(base), encoding="utf-8")
+        with patch.dict(os.environ, {"AUDIENCES_CONFIG_PATH": str(fixture)}):
+            audiences.reload()
+            got = audiences.site_filter("student")
+            _check("two domains are OR-ed in parentheses",
+                   got == "(site:sjsu.edu OR site:example.test)", got)
+    audiences.reload()
+    _check("the fixture did not leak into later checks",
+           audiences.site_filter("student") == "site:sjsu.edu")
 
 
 def test_unknown_audience_falls_back_rather_than_raising():
@@ -302,6 +328,7 @@ def main():
         test_every_audience_has_prompt_material,
         test_suggestions_are_usable,
         test_site_filter_shape,
+        test_site_filter_ors_several_domains,
         test_unknown_audience_falls_back_rather_than_raising,
         test_the_ui_and_backend_read_the_same_file,
     ):

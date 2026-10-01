@@ -9,13 +9,18 @@ crawl_sources, build_rag_prompt end-to-end) are not exercised here — those
 need integration tests with a mock HTTP server.
 """
 import asyncio
+import json
+import os
+import pathlib
 import socket
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import audiences  # noqa: E402
 from services.web_search import (  # noqa: E402
     _canonicalize_url,
     _clean_text,
@@ -177,36 +182,43 @@ def test_rank_sources_demotes_other_universities_without_dropping_them():
 
 
 def test_rank_sources_prefers_the_audiences_own_collection():
-    print("\n[2.6] a domain in the audience's collection outranks one outside it")
-    # sjsualumni.org is in the alumni collection and in nobody else's. It is
-    # also not a .edu and not in PREFERRED_DOMAINS, so for any other audience
-    # it scores as a plain third-party page. That difference is the whole point
-    # of sourceCollections, and it is what this pins.
+    print("\n[2.6] a domain in the audience collection outranks one outside it")
+
+    # Every audience now scopes to sjsu.edu alone, so the per-audience
+    # difference has to be exercised against a fixture config. It used to be
+    # tested with sjsualumni.org, which turned out not to resolve at all --
+    # the test passed anyway, because rank_sources is pure string matching.
+    # Asserting ranking behaviour for a domain nobody owns is how that
+    # survived a review and a push.
+    base = json.loads(audiences.config_path().read_text(encoding="utf-8"))
+    base["audiences"]["alumni"]["sourceCollections"] = ["sjsu.edu", "example.test"]
+
     results = [
-        {"url": "https://www.sjsualumni.org/transcripts", "title": "Alumni transcripts"},
+        {"url": "https://www.example.test/transcripts", "title": "Collection domain"},
         {"url": "https://www.example.com/transcripts", "title": "Some blog"},
         {"url": "https://harvard.edu/transcripts", "title": "Unrelated .edu"},
     ]
 
-    alumni = [r["url"] for r in rank_sources(results, "alumni")]
-    _check(
-        "the alumni site leads for an alum",
-        alumni[0] == "https://www.sjsualumni.org/transcripts",
-        str(alumni),
-    )
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture = pathlib.Path(tmp) / "audiences.json"
+        fixture.write_text(json.dumps(base), encoding="utf-8")
+        with patch.dict(os.environ, {"AUDIENCES_CONFIG_PATH": str(fixture)}):
+            audiences.reload()
+            alumni = [r["url"] for r in rank_sources(results, "alumni")]
+            _check("a collection domain leads for that audience",
+                   alumni[0] == "https://www.example.test/transcripts", str(alumni))
 
-    student = [r["url"] for r in rank_sources(results, "student")]
-    _check(
-        "for a student it is just another third-party page, so the .edu wins",
-        student[0] == "https://harvard.edu/transcripts",
-        str(student),
-    )
+            # For an audience without it in their collection it is just another
+            # third-party page, so the .edu outranks it. That difference is the
+            # whole point of sourceCollections.
+            student = [r["url"] for r in rank_sources(results, "student")]
+            _check("outside the collection it loses to a plain .edu",
+                   student[0] == "https://harvard.edu/transcripts", str(student))
+    audiences.reload()
 
-    # sjsu.edu is in every audience's collection, so it is always in the top
-    # tier -- but "top tier" is the claim, not "first". For an alum,
-    # sjsualumni.org is in the same collection and ties with it on score, and
-    # the tie is broken by the order the search returned them. Asserting
-    # position here would be asserting an accident.
+    # sjsu.edu is in every audience collection, so it is always top tier --
+    # "top tier", not "first": a tie is broken by the order search returned
+    # them, and asserting position would be asserting an accident.
     with_sjsu = results + [{"url": "https://www.sjsu.edu/registrar", "title": "Registrar"}]
     for audience in ("student", "alumni", "faculty", "guest"):
         ranked = [r["url"] for r in rank_sources(with_sjsu, audience)]

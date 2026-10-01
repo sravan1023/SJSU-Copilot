@@ -13,7 +13,14 @@
     "affiliation_kind is a SIX-value enum and is a different concept: what a",
     "person claims to be, not which experience they get. affiliations[] below",
     "maps the two. 'staff' folds into faculty; 'applicant' and 'community' fold",
-    "into guest; guest itself declares no affiliation at all."
+    "into guest; guest itself declares no affiliation at all.",
+    "",
+    "sourceCollections is a list because the mechanism supports several",
+    "registrable domains, but every SJSU source currently lives under sjsu.edu --",
+    "careercenter.sjsu.edu and library.sjsu.edu are subdomains, which site: already",
+    "covers. Alumni briefly listed sjsualumni.org; that domain does not resolve",
+    "(NXDOMAIN, checked 2026-09-30), so the clause could never match. Verify a",
+    "domain resolves before adding it here."
   ],
 
   "default": "student",
@@ -59,7 +66,7 @@
       "welcomeHeadline": "Welcome back. What can I help you find?",
       "affiliations": ["alumni"],
       "declaresAffiliation": "alumni",
-      "sourceCollections": ["sjsu.edu", "sjsualumni.org"],
+      "sourceCollections": ["sjsu.edu"],
       "offices": [
         "the Alumni Association for membership, events and benefits",
         "the Registrar for transcripts and degree verification",
