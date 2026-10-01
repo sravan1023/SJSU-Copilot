@@ -173,7 +173,12 @@ def test_an_over_release_cannot_go_negative():
 
 def test_the_chat_route_answers_429_with_a_retry_after():
     """The limiter is actually attached, and says when to come back."""
-    env = {**ON, "USER_RATE_PER_MIN": "60", "USER_RATE_BURST": "1"}
+    # PER_MIN=1, not 60. At 60/min the bucket refills a whole token every second,
+    # and these requests make a real provider call -- so whenever Groq was slow
+    # (it is throttled org-wide at 8,000 tok/min) the token was back before the
+    # second request arrived and this failed intermittently. The refill rate has
+    # to be slower than the thing being measured, or the test is a race.
+    env = {**ON, "USER_RATE_PER_MIN": "1", "USER_RATE_BURST": "1"}
     body = {"messages": [{"role": "user", "content": "hi"}]}
 
     first = _request("/api/chat", headers=AUTH_HEADERS, env=env, json=body)
@@ -214,8 +219,11 @@ def test_a_guest_and_a_user_do_not_share_a_budget_over_http():
     also meant the same bucket was refilled at the guest rate or the user rate
     depending on who called last.
     """
-    env = {**ON, "GUEST_RATE_PER_MIN": "60", "GUEST_RATE_BURST": "1",
-           "USER_RATE_PER_MIN": "60", "USER_RATE_BURST": "1"}
+    # 1/min rather than 60/min, for the reason given in the 429 test above: four
+    # real provider calls run between the first request and the last assertion,
+    # and a one-second refill makes the outcome depend on Groq's latency.
+    env = {**ON, "GUEST_RATE_PER_MIN": "1", "GUEST_RATE_BURST": "1",
+           "USER_RATE_PER_MIN": "1", "USER_RATE_BURST": "1"}
     body = {"messages": [{"role": "user", "content": "hi"}]}
 
     assert _request("/api/chat", headers=GUEST_HEADERS, env=env, json=body).status_code != 429
