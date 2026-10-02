@@ -12,7 +12,10 @@ as of that date; none sent an ETag or Last-Modified header.
 | `final-exam-schedule-fall-2026.html` | https://www.sjsu.edu/classes/final-exam-schedule/fall-2026.php | whole |
 | `bursar-payment-due-dates-fall.html` | https://www.sjsu.edu/bursar/fees-due-dates/payment-due-dates/fall.php | whole |
 
-Privacy: every instructor `mailto:` href in the schedule is replaced with
+Privacy: instructor names in the schedule are placeholders. Each of the 224 distinct
+real names was replaced by a stable `Instructor 001` ... `Instructor 224` (the same
+name always maps to the same placeholder; `Staff` is kept as is). Row structure,
+` / ` separators and repeats are unchanged. Every instructor `mailto:` href in the schedule is replaced with
 `mailto:redacted@example.edu`. The anchor structure is kept so a parser test can
 assert that no mailto is stored. Department contact mailtos in the page chrome of
 the small pages are untouched.
