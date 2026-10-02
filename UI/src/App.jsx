@@ -625,6 +625,9 @@ export default function App() {
   // of them recovered when the placeholder row was gone, and they marked
   // 'assistant_saved' at different points. Both are reconciled below.
   const runAssistantTurn = async ({ turn, prepare }) => {
+    // Hoisted so the catch knows whether the answer finished streaming (a save
+    // failure) or was cut off (a stream failure).
+    let streamFinished = false;
     try {
       const {
         conversationId,
@@ -663,6 +666,7 @@ export default function App() {
         },
       });
 
+      streamFinished = true;
       const sources = assistantMeta?.sources || [];
       setRightPanelLinks(sources);
       setRightPanelContent(sources.length > 0 ? 'links' : 'empty');
@@ -717,18 +721,26 @@ export default function App() {
       // fresh row if it never got pushed or has already been replaced.
       // Regenerate used to only patch by id, so an error that arrived after the
       // placeholder went away was silent.
+      // Text that is already on screen (a prefix card, a partial answer) is
+      // kept and the error goes below it; only an empty placeholder is replaced.
+      const notice = streamFinished
+        ? `**Not saved:** ${err.message}`
+        : `**Error:** ${err.message}`;
       setMessages(prev => {
         const last = prev[prev.length - 1];
         if (last?.sender === 'bot') {
-          return prev.map(m =>
-            m.id === last.id ? { ...m, text: `**Error:** ${err.message}` } : m
-          );
+          return prev.map(m => {
+            if (m.id !== last.id) return m;
+            return m.text && m.text.trim()
+              ? { ...m, text: `${m.text}\n\n---\n${notice}` }
+              : { ...m, text: notice };
+          });
         }
         return [
           ...prev,
           {
             id: `err-${Date.now()}`,
-            text: `**Error:** ${err.message}`,
+            text: notice,
             sender: 'bot',
           },
         ];
