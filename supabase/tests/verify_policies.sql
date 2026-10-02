@@ -62,6 +62,41 @@ begin
   end;
 end $$;
 
+-- Did the statement raise for the expected reason?
+--
+-- pg_temp.expect only asks whether a statement raised, so a constraint test can
+-- pass on a missing fixture row (a foreign-key error), a permission error, or a
+-- different constraint than the one under test. This also checks the SQLSTATE
+-- and the object the error names: the constraint for a check or unique
+-- violation, the column for a not-null violation.
+create or replace function pg_temp.expect_violation(
+  p_label text, p_sql text, p_sqlstate text, p_object text,
+  p_role text default 'authenticated', p_uid text default null
+) returns void language plpgsql as $$
+declare raised boolean := false; st text; con text; col text; msg text;
+begin
+  begin
+    perform set_config('role', p_role, true);
+    if p_uid is not null then
+      perform set_config('request.jwt.claim.sub', p_uid, true);
+      perform set_config('request.jwt.claim.role', p_role, true);
+    end if;
+    execute p_sql;
+  exception when others then
+    raised := true;
+    get stacked diagnostics st = returned_sqlstate, con = constraint_name,
+                            col = column_name, msg = message_text;
+  end;
+  perform set_config('role', 'postgres', true);
+  if not raised then
+    raise notice '  FAIL % [unexpectedly ALLOWED]', p_label;
+  elsif st = p_sqlstate and p_object in (con, col) then
+    raise notice '  ok   % [blocked: % on %]', p_label, st, p_object;
+  else
+    raise notice '  FAIL % [blocked for the wrong reason: % %]', p_label, st, substr(msg, 1, 65);
+  end if;
+end $$;
+
 \echo ''
 \echo '=== 0. Fixture: can an account be created at all? ==='
 DO $$
@@ -1015,7 +1050,7 @@ BEGIN
     ('campus_refresh_runs',
      $i$insert into public.campus_refresh_runs (outcome) values ('success')$i$),
     ('reg_class_sections',
-     $i$insert into public.reg_class_sections (snapshot_id, class_number, course_key) values ('c0000000-0000-4000-8000-000000000002', 49999, 'CS 999')$i$),
+     $i$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meeting_count) values ('c0000000-0000-4000-8000-000000000002', 49999, 'CS 999', 1)$i$),
     ('reg_term_events',
      $i$insert into public.reg_term_events (snapshot_id, category, label_raw, date_raw) values ('c0000000-0000-4000-8000-000000000005', 'payment', 'Forged deadline', 'Mon, Jan. 4')$i$),
     ('reg_exam_rules',
@@ -1152,7 +1187,7 @@ select pg_temp.expect_rows('service_role finds a section by one area of a combin
   1, 'service_role');
 -- Nothing constrains what a tag may say: the vocabulary belongs to the parser.
 select pg_temp.expect('satisfies accepts tags in any spelling',
-  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, satisfies_raw, satisfies) values ('c0000000-0000-4000-8000-000000000002', 40004, 'KIN 1', 'GE: 1Bor4', '{"GE: 1Bor4","PE: PhysEd","AI: US1",GWAR,WID}')$q$,
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, satisfies_raw, satisfies, meeting_count) values ('c0000000-0000-4000-8000-000000000002', 40004, 'KIN 1', 'GE: 1Bor4', '{"GE: 1Bor4","PE: PhysEd","AI: US1",GWAR,WID}', 1)$q$,
   false, 'service_role');
 
 -- Constraints bind the service role too. They are what stop a refresh bug from
@@ -1175,7 +1210,7 @@ select pg_temp.expect('an unknown refresh outcome is rejected',
 -- The page's own duplicate (PHYS 50 section 25). The parser drops exact
 -- duplicates; one that gets this far is a parser bug and must fail the batch.
 select pg_temp.expect('a duplicate class number within one snapshot is rejected (43104)',
-  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, section) values ('c0000000-0000-4000-8000-000000000002', 43104, 'PHYS 50', '25')$q$,
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, section, meeting_count) values ('c0000000-0000-4000-8000-000000000002', 43104, 'PHYS 50', '25', 1)$q$,
   true, 'service_role');
 -- A count of 1 against two meetings would let the final-exam lookup compute a
 -- slot from the first pattern alone, which is exactly the guess it must refuse.
@@ -1183,7 +1218,7 @@ select pg_temp.expect('a meeting_count that disagrees with meetings is rejected'
   $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000002', 40005, 'ENGR 10', '[{"days":"MW"},{"days":"TBA"}]', 1)$q$,
   true, 'service_role');
 select pg_temp.expect('a meetings value that is not an array is rejected',
-  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings) values ('c0000000-0000-4000-8000-000000000002', 40006, 'ENGR 10', '{"days":"MW"}')$q$,
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000002', 40006, 'ENGR 10', '{"days":"MW"}', 1)$q$,
   true, 'service_role');
 select pg_temp.expect('an unknown event category is rejected',
   $q$insert into public.reg_term_events (snapshot_id, category, label_raw, date_raw) values ('c0000000-0000-4000-8000-000000000003', 'parking', 'x', 'x')$q$,
@@ -1278,3 +1313,122 @@ END $$;
 select pg_temp.expect('the newly current snapshot cannot be deleted',
   $q$delete from public.campus_snapshots where id = 'c0000000-0000-4000-8000-000000000002'$q$,
   true, 'service_role');
+
+\echo ''
+\echo '=== 24. reg_class_sections.meeting_count: no default, at least 1 (20261002000100) ==='
+-- The final-exam lookup refuses a multi-pattern section on meeting_count alone,
+-- so the count has to be one the producer stated. 20261001000100 defaulted it to
+-- 1, which let a two-meeting section with an unfilled `meetings` array pass as a
+-- one-meeting section. Every refusal below names the constraint or column it
+-- expects, so none can pass on a missing fixture row or on a different check.
+--
+-- Everything here runs as service_role, the only role that can write the table.
+-- That no grant changed is section 23's catalog check, which runs against the
+-- schema after every migration, this one included.
+--
+-- Fixture: c...07 is a staged spring-2027 schedule snapshot of its own, so these
+-- rows stay out of section 23's counts.
+
+select pg_temp.expect('service_role inserts a staged spring-2027 schedule snapshot',
+  $q$insert into public.campus_snapshots (id, source_key, scope_key, source_url, content_hash) values ('c0000000-0000-4000-8000-000000000007', 'schedule', 'spring-2027', 'https://www.sjsu.edu/classes/schedules/spring-2027.php', 'h7')$q$,
+  false, 'service_role');
+
+-- The catalog, so that a NOT VALID constraint or a different bound shows up by
+-- name rather than only through whichever values the tests below happen to try.
+DO $$
+DECLARE not_null boolean; has_def boolean; def text; con_def text; con_valid boolean;
+BEGIN
+  SELECT a.attnotnull, a.atthasdef, pg_get_expr(d.adbin, d.adrelid)
+    INTO not_null, has_def, def
+    FROM pg_attribute a
+    LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+   WHERE a.attrelid = 'public.reg_class_sections'::regclass
+     AND a.attname = 'meeting_count' AND NOT a.attisdropped;
+  IF not_null AND NOT has_def THEN
+    RAISE NOTICE '  ok   meeting_count is NOT NULL with no default';
+  ELSE
+    RAISE NOTICE '  FAIL meeting_count: not null %, default %', not_null, coalesce(def, 'none');
+  END IF;
+
+  SELECT pg_get_constraintdef(c.oid), c.convalidated INTO con_def, con_valid
+    FROM pg_constraint c
+   WHERE c.conrelid = 'public.reg_class_sections'::regclass
+     AND c.conname = 'reg_class_sections_meeting_count_check' AND c.contype = 'c';
+  IF con_def = 'CHECK ((meeting_count >= 1))' AND con_valid THEN
+    RAISE NOTICE '  ok   reg_class_sections_meeting_count_check is CHECK (meeting_count >= 1), validated';
+  ELSE
+    RAISE NOTICE '  FAIL reg_class_sections_meeting_count_check: %, validated %',
+      coalesce(con_def, 'missing'), con_valid;
+  END IF;
+END $$;
+
+-- The finding itself: a two-pattern section whose producer filled neither the
+-- array nor the count. Under 20261001000100 this stored meeting_count = 1.
+select pg_temp.expect_violation('an insert that omits meeting_count is rejected (meetings left as [])',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, days, start_time, end_time, times_raw, meetings) values ('c0000000-0000-4000-8000-000000000007', 41001, 'ENGR 10', 'MW', '10:30', '11:45', '10:30AM-11:45AM<br>TBA', '[]')$q$,
+  '23502', 'meeting_count', 'service_role');
+-- Even where 1 would have been right: the producer always states the count.
+select pg_temp.expect_violation('an insert that omits meeting_count is rejected (one meeting filled in)',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings) values ('c0000000-0000-4000-8000-000000000007', 41002, 'PHYS 50', '[{"days":"TR","start_time":"13:30","end_time":"14:45"}]')$q$,
+  '23502', 'meeting_count', 'service_role');
+-- What PostgREST sends for a batch object that lacks the key.
+select pg_temp.expect_violation('an explicit null meeting_count is rejected',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000007', 41003, 'ENGR 10', '[]', null)$q$,
+  '23502', 'meeting_count', 'service_role');
+-- 0 and below. Against [] the consistency check accepts any count, so only the
+-- new constraint can refuse these.
+select pg_temp.expect_violation('meeting_count = 0 is rejected',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000007', 41004, 'ENGR 10', '[]', 0)$q$,
+  '23514', 'reg_class_sections_meeting_count_check', 'service_role');
+select pg_temp.expect_violation('a negative meeting_count is rejected (-1)',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000007', 41005, 'ENGR 10', '[]', -1)$q$,
+  '23514', 'reg_class_sections_meeting_count_check', 'service_role');
+
+-- What a producer that states the count still writes. 41012 is the fully
+-- online shape (Days and Times both 'TBA'), the row a count of 0 would
+-- otherwise describe. 41014 is a producer that states the count but not the
+-- array; the lookup can refuse it on the count alone.
+select pg_temp.expect_rows('a one-meeting section with meeting_count = 1 is stored',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, days, start_time, end_time, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000007', 41011, 'PHYS 50', 'TR', '13:30', '14:45', '[{"days":"TR","start_time":"13:30","end_time":"14:45","location":"SCI 142","instructor":"Staff"}]', 1)$q$,
+  1, 'service_role');
+select pg_temp.expect_rows('a fully online TBA section with meeting_count = 1 is stored',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, mode, days, times_raw, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000007', 41012, 'AAS 1', 'Fully Online', 'TBA', 'TBA', '[{"days":"TBA","start_time":null,"end_time":null,"location":"ONLINE","instructor":"Staff"}]', 1)$q$,
+  1, 'service_role');
+select pg_temp.expect_rows('a two-meeting section with meeting_count = 2 is stored',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, days, start_time, end_time, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000007', 41013, 'ENGR 10', 'MW', '10:30', '11:45', '[{"days":"MW","start_time":"10:30","end_time":"11:45","location":"ENG 189","instructor":"B"},{"days":"TBA","start_time":null,"end_time":null,"location":"ONLINE","instructor":"B"}]', 2)$q$,
+  1, 'service_role');
+select pg_temp.expect_rows('meeting_count = 2 with meetings left as [] is stored (the count alone)',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, days, start_time, end_time, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000007', 41014, 'ME 30', 'MW', '09:00', '10:15', '[]', 2)$q$,
+  1, 'service_role');
+
+-- The consistency rule from 20261001000100 still holds: a filled-in array and
+-- the count must agree, and `meetings` must be an array.
+select pg_temp.expect_violation('meeting_count = 1 against two meetings is still rejected',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000007', 41021, 'ENGR 10', '[{"days":"MW"},{"days":"TBA"}]', 1)$q$,
+  '23514', 'reg_class_sections_meetings_check', 'service_role');
+select pg_temp.expect_violation('meeting_count = 3 against two meetings is still rejected',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000007', 41022, 'ENGR 10', '[{"days":"MW"},{"days":"TBA"}]', 3)$q$,
+  '23514', 'reg_class_sections_meetings_check', 'service_role');
+select pg_temp.expect_violation('meeting_count = 2 against one meeting is still rejected',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000007', 41023, 'PHYS 50', '[{"days":"TR"}]', 2)$q$,
+  '23514', 'reg_class_sections_meetings_check', 'service_role');
+select pg_temp.expect_violation('a meetings value that is not an array is still rejected',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000007', 41024, 'ENGR 10', '{"days":"MW"}', 1)$q$,
+  '23514', 'reg_class_sections_meetings_check', 'service_role');
+
+-- The update path: an upsert's DO UPDATE, or a repair script. `= default` is
+-- null now that there is no default, so it cannot quietly restore a 1.
+select pg_temp.expect_violation('setting meeting_count to DEFAULT is rejected (there is none)',
+  $q$update public.reg_class_sections set meeting_count = default where snapshot_id = 'c0000000-0000-4000-8000-000000000007' and class_number = 41011$q$,
+  '23502', 'meeting_count', 'service_role');
+select pg_temp.expect_violation('updating meeting_count to 0 is rejected',
+  $q$update public.reg_class_sections set meeting_count = 0 where snapshot_id = 'c0000000-0000-4000-8000-000000000007' and class_number = 41014$q$,
+  '23514', 'reg_class_sections_meeting_count_check', 'service_role');
+
+-- Nothing rejected above was stored, and nothing stored changed its count.
+select pg_temp.expect_rows('snapshot c...07 holds exactly the four valid sections',
+  $q$select 1 from public.reg_class_sections where snapshot_id = 'c0000000-0000-4000-8000-000000000007'$q$,
+  4, 'service_role');
+select pg_temp.expect_rows('each stored section kept the count its producer stated',
+  $q$select 1 from public.reg_class_sections where snapshot_id = 'c0000000-0000-4000-8000-000000000007' and (class_number, meeting_count) in ((41011, 1), (41012, 1), (41013, 2), (41014, 2))$q$,
+  4, 'service_role');
