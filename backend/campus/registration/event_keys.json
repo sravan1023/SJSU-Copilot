@@ -311,7 +311,7 @@
     "Thanksgiving Holiday"
    ],
    "question_patterns": [
-    "\\bthanksgiving\\b"
+    "\\bthanksgiving\\b(?!\\s+(break|week|recess|vacation)\\b)"
    ]
   },
   "instruction_last_day": {
@@ -321,9 +321,9 @@
     "Last Day of Instruction"
    ],
    "question_patterns": [
-    "last day of (instruction|classes|class|school|the semester|the term)",
-    "when (do|does) (classes|school|the semester|the term|instruction) end",
-    "(classes|semester|instruction) end date"
+    "last day of (instruction|classes|class)",
+    "when (do|does) (classes|instruction) end",
+    "(classes|instruction) end date"
    ]
   },
   "grade_posting_opens": {
@@ -601,6 +601,28 @@
     "\\bdays? off\\b",
     "\\bno classes\\b",
     "school closed"
+   ]
+  },
+  "term_end": {
+   "keys": [
+    "instruction_last_day",
+    "finals_period",
+    "make_up_day"
+   ],
+   "question_patterns": [
+    "when (do|does|is) (the )?((fall|spring|summer|winter)( 20\\d\\d)? |next |this )?(semester|term|school)( \\w+)? (end|over|finish)",
+    "when (do|does) (fall|spring|summer|winter)( 20\\d\\d)? (end|finish)",
+    "(semester|term) end date",
+    "last day of (school|the semester|the term)"
+   ]
+  },
+  "thanksgiving_break": {
+   "keys": [
+    "holiday_thanksgiving",
+    "non_instructional_day"
+   ],
+   "question_patterns": [
+    "\\bthanksgiving (break|week|recess|vacation)\\b"
    ]
   }
  }
