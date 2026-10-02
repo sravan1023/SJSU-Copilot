@@ -46,7 +46,8 @@ def _groq_ok(*deltas):
     )
 
 
-def _chat(routers, content="when is the add deadline", deltas=("Model answer.",)):
+def _chat(routers, content="when is the add deadline", deltas=("Model answer.",),
+          groq_response=None, stream_chat_patch=None):
     """POST /api/chat; return (frames, groq route, rag call count, timing record)."""
     rag_calls = []
 
@@ -72,8 +73,14 @@ def _chat(routers, content="when is the add deadline", deltas=("Model answer.",)
              patch.object(structured_answers, "ROUTERS", routers), \
              patch("routers.chat.build_rag_prompt", _rag), \
              patch.dict("os.environ", {"GROQ_API_KEY": "test-key"}):
-            route = mock.post(llm.GROQ_API_URL).mock(return_value=_groq_ok(*deltas))
-            frames = asyncio.run(go())
+            route = mock.post(llm.GROQ_API_URL).mock(
+                return_value=groq_response or _groq_ok(*deltas)
+            )
+            if stream_chat_patch is not None:
+                with patch("routers.chat.stream_chat", stream_chat_patch):
+                    frames = asyncio.run(go())
+            else:
+                frames = asyncio.run(go())
         timing = next(r for r in capture.records if r.getMessage() == "request timings")
         return frames, route, len(rag_calls), timing
     finally:
@@ -246,3 +253,152 @@ async def _answer_with(text, seen):
             "student",
             "user",
         )
+
+
+
+# -- Hardening: contracts the seam enforces ------------------------------------
+
+PREFIX = Answer(mode="prefix", markdown=CARD_MD, route="crisis", card={"kind": "crisis"})
+
+
+def test_prefix_keeps_the_card_when_the_provider_returns_429():
+    # The crisis scenario: the card is on screen, then Groq says 429. An error
+    # frame would make the client discard the message, so the turn must end in
+    # a done frame that carries the card.
+    resp = httpx.Response(429, headers={"retry-after": "7"}, text="slow down")
+    frames, route, _, timing = _chat([_router(PREFIX)], groq_response=resp)
+
+    assert route.call_count == 1
+    assert not any("error" in f for f in frames)
+    done = frames[-1]
+    assert done["done"] is True and done["answer_mode"] == "prefix"
+    assert done["full_response"].startswith(CARD_MD + "\n\n")
+    assert done["full_response"].endswith(chat_router.PREFIX_FAILURE_LINE)
+    assert done["card"] == {"kind": "crisis"}
+    assert timing.outcome == "upstream_error"
+
+
+def test_prefix_keeps_the_card_when_generation_raises_mid_stream():
+    async def broken(**_kw):
+        yield 'data: {"token": "Partial "}\n\n'
+        raise RuntimeError("boom")
+
+    frames, _, _, timing = _chat([_router(PREFIX)], stream_chat_patch=broken)
+
+    assert not any("error" in f for f in frames)
+    done = frames[-1]
+    # What the client rendered (card, partial answer, note) is what gets saved.
+    shown = "".join(f["token"] for f in frames if "token" in f)
+    assert done["done"] is True and done["full_response"] == shown
+    assert done["full_response"] == (
+        CARD_MD + "\n\nPartial \n\n" + chat_router.PREFIX_FAILURE_LINE
+    )
+    assert timing.outcome == "error"
+
+
+def test_without_a_prefix_an_exception_still_ends_in_an_error_frame():
+    async def broken(**_kw):
+        raise RuntimeError("boom")
+        yield  # pragma: no cover
+
+    frames, _, _, _ = _chat([], stream_chat_patch=broken)
+    assert "error" in frames[-1] and "done" not in frames[-1]
+
+
+def test_prefix_keeps_the_card_when_retrieval_raises_after_the_prefix():
+    async def bad_rag(messages, audience=None, **_kw):
+        raise RuntimeError("search exploded")
+
+    async def go():
+        transport = httpx.ASGITransport(app=main.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            res = await client.post(
+                "/api/chat",
+                json={"messages": [{"role": "user", "content": "deadline?"}]},
+                headers=AUTH_HEADERS,
+            )
+            return [json.loads(l[6:]) for l in res.text.splitlines() if l.startswith("data: ")]
+
+    with patch.object(structured_answers, "ROUTERS", [_router(PREFIX)]), \
+         patch("routers.chat.build_rag_prompt", bad_rag):
+        frames = asyncio.run(go())
+    assert frames[-1]["done"] is True and frames[-1]["full_response"].startswith(CARD_MD)
+    assert not any("error" in f for f in frames)
+
+
+def test_card_and_context_cannot_act_on_a_gated_turn():
+    card = Answer(mode="card", markdown="CARD", route="x")
+    ctx = Answer(mode="context", rag_prompt="Context: x", route="x")
+    for ans in (card, ctx):
+        frames, route, rag_calls, timing = _chat([_router(ans)], content="thanks")
+        assert route.call_count == 1  # the model answered; the router did not
+        assert frames[-1]["full_response"] == "Model answer."
+        assert "answer_mode" not in frames[-1]
+        assert timing.counters["structured_fallthrough"] == "gated"
+
+
+def test_prefix_may_act_on_a_gated_turn():
+    frames, route, _, timing = _chat([_router(PREFIX)], content="thanks")
+    assert frames[-1]["full_response"] == CARD_MD + "\n\nModel answer."
+    assert timing.counters["answer_mode"] == "prefix"
+
+
+def test_invalid_results_fall_through_and_are_recorded():
+    bad = [
+        "a string, not an Answer",
+        {"mode": "card", "markdown": "dict"},
+        Answer(mode="card", markdown=""),
+        Answer(mode="card", markdown="   "),
+        Answer(mode="context", rag_prompt=None),
+        Answer(mode="context", rag_prompt=""),
+        Answer(mode="prefix", markdown=""),
+        Answer(mode="bogus", markdown="x"),
+        Answer(mode="card", markdown="x", sources="not a list"),
+        Answer(mode="card", markdown="x", card="not a dict"),
+    ]
+    for result in bad:
+        frames, route, rag_calls, timing = _chat([_router(result)])
+        assert rag_calls == 1 and route.call_count == 1, result
+        assert frames[-1]["full_response"] == "Model answer.", result
+        assert not any("error" in f for f in frames), result
+        assert timing.counters["structured_fallthrough"] == "invalid", result
+
+
+def test_an_invalid_result_does_not_hide_a_later_valid_router():
+    good = Answer(mode="card", markdown="good", route="second")
+    frames, route, _, _ = _chat([_router(Answer(mode="card", markdown="")), _router(good)])
+    assert frames[-1]["full_response"] == "good" and route.call_count == 0
+
+
+def test_a_router_cannot_mutate_the_messages_the_model_receives():
+    async def vandal(q):
+        q.messages[-1]["content"] = "TAMPERED"
+        q.messages.append({"role": "user", "content": "INJECTED"})
+        return None
+
+    seen = []
+    frames, route, _, _ = _chat([vandal, _router(None, seen)], content="when is the add deadline")
+
+    body = json.loads(route.calls.last.request.content)["messages"]
+    assert [m["content"] for m in body[1:]] == ["when is the add deadline"]
+    # And the next router got a clean copy, not the vandal's.
+    assert seen[0].messages[-1]["content"] == "when is the add deadline"
+    assert len(seen[0].messages) == 1
+
+
+def test_prefix_sources_are_appended_after_retrieval_sources_without_duplicates():
+    extra = [
+        {"title": "Dup", "url": "https://www.sjsu.edu/retrieved"},
+        {"title": "Cares", "url": "https://www.sjsu.edu/sjsucares/"},
+    ]
+    ans = Answer(mode="prefix", markdown=CARD_MD, sources=extra)
+    frames, _, _, _ = _chat([_router(ans)])
+    # Retrieval's [1] stays [1]; the router's new source follows it.
+    assert frames[-1]["sources"] == [RAG_SOURCES[0], extra[1]]
+
+
+def test_prefix_sources_survive_a_failed_generation():
+    extra = [{"title": "Cares", "url": "https://www.sjsu.edu/sjsucares/"}]
+    ans = Answer(mode="prefix", markdown=CARD_MD, sources=extra)
+    frames, _, _, _ = _chat([_router(ans)], groq_response=httpx.Response(500, text="down"))
+    assert frames[-1]["done"] is True and frames[-1]["sources"] == extra

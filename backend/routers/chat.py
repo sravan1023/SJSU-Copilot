@@ -83,7 +83,6 @@ class ChatRequest(BaseModel):
     # is total, and rejecting a request because a client sent a stale audience
     # id would break the chat over a cosmetic field.
     audience: str | None = Field(default=None, max_length=32)
-
     _check_messages = field_validator("messages")(_check_total_chars)
 
 
@@ -149,6 +148,47 @@ async def _structured_answer(
     return answer
 
 
+# Shown when the model could not finish after a prefix card was already emitted.
+PREFIX_FAILURE_LINE = "I couldn't finish the rest of this answer — please try again."
+
+
+def _merge_sources(model_sources: list[dict] | None, extra: list[dict]) -> list[dict]:
+    """Retrieval sources first, so the model's [N] numbers stay valid."""
+    merged = list(model_sources or [])
+    seen = {s.get("url") for s in merged}
+    for s in extra or []:
+        if s.get("url") not in seen:
+            merged.append(s)
+            seen.add(s.get("url"))
+    return merged
+
+
+def _prefix_failure_frames(prefix: str, streamed: str, answer, request_id: str) -> list[str]:
+    """Close a prefix-mode turn whose generation failed, keeping the card.
+
+    The client throws on an `error` frame and the UI then overwrites the message
+    and persists nothing, so a `replace` before the error would not save the
+    card. A terminal `done` whose full_response is the card plus a short note
+    is the only shape that keeps and stores it. `streamed` is whatever model
+    text the client already rendered, so the saved text matches the screen.
+    """
+    note = ("\n\n" if streamed else "") + PREFIX_FAILURE_LINE
+    done = {
+        "done": True,
+        "full_response": prefix + streamed + note,
+        "validators_run": [],
+        "validators_passed": True,
+        "repairs_applied": [],
+        "answer_mode": "prefix",
+        "request_id": request_id,
+    }
+    if answer.card is not None:
+        done["card"] = answer.card
+    if answer.sources:
+        done["sources"] = list(answer.sources)
+    return [_sse({"token": note}), _sse(done)]
+
+
 def _prepend_to_full_text(frame: str, prefix: str, answer) -> str:
     """Make the done and replace frames carry the prefix the client already saw.
 
@@ -170,6 +210,8 @@ def _prepend_to_full_text(frame: str, prefix: str, answer) -> str:
         payload["answer_mode"] = "prefix"
         if answer.card is not None:
             payload["card"] = answer.card
+        if answer.sources:
+            payload["sources"] = _merge_sources(payload.get("sources"), answer.sources)
     return _sse(payload)
 
 
@@ -241,6 +283,10 @@ async def chat(
         observability.record("audience", audience)
         observability.record("history_messages", len(messages))
         outcome = "ok"
+        # Set before anything can raise, so the failure paths can tell whether a
+        # prefix card is already on the client's screen. `streamed` is the model
+        # text sent after it.
+        prefix_text, streamed, structured = "", "", None
         try:
             yield _sse({"status": "received", "request_id": request_id})
 
@@ -282,7 +328,6 @@ async def chat(
 
             yield _sse({"status": "searching"})
 
-            prefix_text = ""
             if structured is not None and structured.mode == "prefix":
                 # Verbatim, then a separator frame, so the emitted markdown
                 # stays byte-equal to its source and the model's answer starts
@@ -329,7 +374,18 @@ async def chat(
             ):
                 if frame.startswith('data: {"error"'):
                     outcome = "upstream_error"
+                    if prefix_text:
+                        for out in _prefix_failure_frames(
+                            prefix_text, streamed, structured, request_id
+                        ):
+                            yield out
+                        return
                 if prefix_text:
+                    if frame.startswith('data: {"token"'):
+                        try:
+                            streamed += json.loads(frame[len("data: "):]).get("token", "")
+                        except json.JSONDecodeError:
+                            pass
                     frame = _prepend_to_full_text(frame, prefix_text, structured)
                 yield frame
 
@@ -348,7 +404,13 @@ async def chat(
             # client understood, or truncated the stream with no terminal frame.
             outcome = "error"
             logger.exception("chat stream failed", extra={"request_id": request_id})
-            yield _sse({"error": "Something went wrong generating this answer."})
+            if prefix_text:
+                for out in _prefix_failure_frames(
+                    prefix_text, streamed, structured, request_id
+                ):
+                    yield out
+            else:
+                yield _sse({"error": "Something went wrong generating this answer."})
         finally:
             # The stream is over here and only here; releasing at handler
             # return would under-count every streaming turn.
