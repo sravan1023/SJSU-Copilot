@@ -171,6 +171,75 @@ def test_prompt_ordering_is_stable_prefix_first():
     _check("prompt starts with policy", p.startswith("POLICY"))
 
 
+def test_student_context_none_is_byte_identical():
+    print("\n[3.2] student_context=None changes nothing")
+    for limits, rag in (
+        (BudgetLimits(4000, 1500), "RAG"),
+        (BudgetLimits(300, 1500), "Context: " + ("retrieved sentence. " * 300)),
+    ):
+        args = ("POLICY", "MEMORY", rag, _msgs("a " * 80, "b " * 80, "q"), limits)
+        base = fit_prompt(*args)
+        with_none = fit_prompt(*args, student_context=None)
+        _check("system prompt identical", base.system_prompt == with_none.system_prompt)
+        _check("messages identical", base.messages == with_none.messages)
+        _check("report identical", base.report == with_none.report)
+        _check("flag stays false", not with_none.report.student_context_dropped)
+    _check(
+        "exact legacy assembly",
+        fit_prompt("P", "M", "R", _msgs("q"), BudgetLimits(4000, 1500)).system_prompt == "P\n\nM\n\nR",
+    )
+
+
+def test_student_context_slot_position():
+    print("\n[3.3] policy, student context, memory, rag")
+    fitted = fit_prompt(
+        "POLICY", "MEMORY", "RAG", _msgs("q"), BudgetLimits(4000, 1500), student_context="STUDENT"
+    )
+    p = fitted.system_prompt
+    _check("exact assembly", p == "POLICY\n\nSTUDENT\n\nMEMORY\n\nRAG", repr(p))
+    _check("not reported dropped", not fitted.report.student_context_dropped)
+
+
+def test_student_context_is_trimmed_last():
+    print("\n[2.7] rag, history and memory all go before student context")
+    student = "STUDENT-FACTS " * 10
+    memory = "a lengthy memory block about the user. " * 30
+    history = ["a long conversation turn. " * 40 + " OLD", "the actual question"]
+
+    # Room for policy + student + question only: everything else must go,
+    # the student context must survive.
+    limits = BudgetLimits(max_prompt_tokens=count_tokens("policy") + count_tokens(student) + 80,
+                          max_completion_tokens=1500)
+    fitted = fit_prompt("policy", memory, "Context: " + "x " * 800, _msgs(*history), limits,
+                        student_context=student)
+    r = fitted.report
+    _check("rag dropped", r.rag_dropped_entirely)
+    _check("history dropped", r.messages_dropped == 1)
+    _check("memory dropped", r.memory_dropped)
+    _check("student context survived", not r.student_context_dropped and "STUDENT-FACTS" in fitted.system_prompt)
+
+    # Rag alone overflowing never touches the student context.
+    limits = BudgetLimits(max_prompt_tokens=800, max_completion_tokens=1500)
+    fitted = fit_prompt("policy", None, "Context: " + "retrieved sentence. " * 500, _msgs("q"), limits,
+                        student_context=student)
+    _check("rag trimmed", fitted.report.rag_tokens_dropped > 0)
+    _check("student context kept", "STUDENT-FACTS" in fitted.system_prompt)
+
+
+def test_student_context_dropped_flag():
+    print("\n[2.8] dropped only when nothing else is left to cut")
+    student = "STUDENT-FACTS " * 60
+    limits = BudgetLimits(max_prompt_tokens=60, max_completion_tokens=1500)
+    fitted = fit_prompt("policy", "memory", None, _msgs("short question"), limits,
+                        student_context=student)
+
+    _check("flag set", fitted.report.student_context_dropped)
+    _check("counts as trimmed", fitted.report.trimmed)
+    _check("gone from prompt", "STUDENT-FACTS" not in fitted.system_prompt)
+    _check("policy survives", "policy" in fitted.system_prompt)
+    _check("logged", fitted.report.as_log_fields()["student_context_dropped"] is True)
+
+
 # ── 4. Completion clamp and model config ──────────────────────────────────────
 
 
@@ -347,6 +416,10 @@ def run():
     test_latest_turn_never_dropped()
     test_tiny_rag_is_dropped_not_slivered()
     test_prompt_ordering_is_stable_prefix_first()
+    test_student_context_none_is_byte_identical()
+    test_student_context_slot_position()
+    test_student_context_is_trimmed_last()
+    test_student_context_dropped_flag()
     test_clamp_completion_tokens()
     test_model_resolution()
     test_completion_params_by_model_family()

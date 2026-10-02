@@ -13,6 +13,7 @@ fixed priority order when the ceiling is exceeded:
     1. retrieved context  -- largest, and the answer degrades gracefully
     2. conversation history -- oldest turns first; the latest turn is never dropped
     3. memory context     -- smallest, and dropping it is the most user-visible
+    4. student context    -- the user's own profile facts; dropped only as a last resort
 
 Counting is approximate by design. The models actually in use (Llama 3.3 via
 Groq, and gpt-oss if enabled) do not use tiktoken's encodings, so an exact count
@@ -117,6 +118,7 @@ class BudgetReport:
     rag_dropped_entirely: bool = False
     messages_dropped: int = 0
     memory_dropped: bool = False
+    student_context_dropped: bool = False
 
     def as_log_fields(self) -> dict:
         return {
@@ -125,6 +127,7 @@ class BudgetReport:
             "rag_dropped_entirely": self.rag_dropped_entirely,
             "messages_dropped": self.messages_dropped,
             "memory_dropped": self.memory_dropped,
+            "student_context_dropped": self.student_context_dropped,
         }
 
     @property
@@ -134,6 +137,7 @@ class BudgetReport:
             or self.messages_dropped
             or self.memory_dropped
             or self.rag_dropped_entirely
+            or self.student_context_dropped
         )
 
 
@@ -151,14 +155,23 @@ def limits_from_env() -> BudgetLimits:
     )
 
 
-def _assemble(policy: str, memory: str | None, rag: str | None) -> str:
+def _assemble(
+    policy: str,
+    memory: str | None,
+    rag: str | None,
+    student_context: str | None = None,
+) -> str:
     """Compose the system prompt, most stable content first.
 
     Ordering matters beyond tidiness: providers cache on a prompt prefix, and
     the previous order put per-turn memory ahead of the static policy, so the
-    prefix changed on every single turn and could never be reused.
+    prefix changed on every single turn and could never be reused. Student
+    context changes only when the profile does, so it sits before memory and
+    RAG, which change per turn.
     """
     parts = [policy]
+    if student_context:
+        parts.append(student_context)
     if memory:
         parts.append(memory)
     if rag:
@@ -172,6 +185,7 @@ def fit_prompt(
     rag_prompt: str | None,
     messages: list[dict],
     limits: BudgetLimits | None = None,
+    student_context: str | None = None,
 ) -> FittedPrompt:
     """Trim the request to fit max_prompt_tokens. Never drops the latest turn."""
     limits = limits or limits_from_env()
@@ -179,10 +193,12 @@ def fit_prompt(
 
     memory = memory_prompt or None
     rag = rag_prompt or None
+    student = student_context or None
     kept = list(messages)
 
     def total(memory_, rag_, msgs) -> int:
-        system = _assemble(policy_prompt, memory_, rag_)
+        # `student` is read at call time, so step 4's reassignment is seen.
+        system = _assemble(policy_prompt, memory_, rag_, student)
         running = count_tokens(system) + TOKENS_PER_MESSAGE
         for m in msgs:
             running += count_tokens(m.get("content")) + TOKENS_PER_MESSAGE
@@ -214,13 +230,19 @@ def fit_prompt(
         memory = None
         report.memory_dropped = True
 
+    # 4. Student context. Last: it is the small, per-user grounding that makes
+    #    the answer about this student, and the only thing left to cut is policy.
+    if student and total(memory, rag, kept) > budget:
+        student = None
+        report.student_context_dropped = True
+
     report.prompt_tokens = total(memory, rag, kept)
 
     if report.trimmed:
         logger.info("prompt trimmed to fit token budget", extra=report.as_log_fields())
 
     return FittedPrompt(
-        system_prompt=_assemble(policy_prompt, memory, rag),
+        system_prompt=_assemble(policy_prompt, memory, rag, student),
         messages=kept,
         report=report,
     )
