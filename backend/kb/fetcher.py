@@ -111,6 +111,9 @@ class FetchResult:
     retry_after: float | None = None
     detail: str | None = None
     links: list[str] = field(default_factory=list)
+    # True when the body hit the byte cap, so `html`/`text` may be cut off. A
+    # structured parser must treat this as a failure, not as a short page.
+    truncated: bool = False
 
     @property
     def ok(self) -> bool:
@@ -209,12 +212,18 @@ async def conditional_get(
     last_modified: str | None = None,
     allowed_hosts: list[str] | None = None,
     want_links: bool = False,
+    max_bytes: int = MAX_BYTES_PER_PAGE,
+    extract: bool = True,
 ) -> FetchResult:
     """Fetch one URL, following redirects by hand and re-checking every hop.
 
     Redirects are walked manually, as the live crawler does, so the scheme and
     host can be re-validated at each hop -- an open redirect on a permitted host
     is otherwise a route to anywhere.
+
+    `max_bytes` raises or lowers the body cap (default: the live crawler's).
+    `extract=False` is for callers that parse structure themselves: HTML comes
+    back raw in `html`, with no main-text extraction and no THIN check.
     """
     if not rules.reachable:
         return FetchResult(Outcome.ROBOTS_UNAVAILABLE, url, detail=rules.error, status=rules.status)
@@ -281,9 +290,11 @@ async def conditional_get(
                 lm_out = res.headers.get("last-modified")
 
                 body = bytearray()
+                truncated = False
                 async for chunk in res.aiter_bytes():
                     body.extend(chunk)
-                    if len(body) >= MAX_BYTES_PER_PAGE:
+                    if len(body) >= max_bytes:
+                        truncated = True
                         break
 
                 if _is_pdf(content_type):
@@ -309,6 +320,7 @@ async def conditional_get(
                     return FetchResult(
                         Outcome.OK, url, final_url=current, text=text, status=res.status_code,
                         content_type=content_type, etag=etag_out, last_modified=lm_out,
+                        truncated=truncated,
                     )
 
                 if "text/html" not in content_type:
@@ -318,6 +330,12 @@ async def conditional_get(
                     )
 
                 html = bytes(body).decode(res.charset_encoding or "utf-8", errors="replace")
+                if not extract:
+                    return FetchResult(
+                        Outcome.OK, url, final_url=current, html=html,
+                        status=res.status_code, content_type=content_type,
+                        etag=etag_out, last_modified=lm_out, truncated=truncated,
+                    )
                 text = _extract_main_text(html)
                 if len(text.strip()) < MIN_USEFUL_CHARS:
                     # Almost always a JavaScript-rendered page. Counted rather
@@ -335,6 +353,7 @@ async def conditional_get(
                     Outcome.OK, url, final_url=current, text=text, html=html,
                     status=res.status_code, content_type=content_type,
                     etag=etag_out, last_modified=lm_out, links=links,
+                    truncated=truncated,
                 )
 
         except httpx.TimeoutException:

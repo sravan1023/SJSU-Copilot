@@ -77,6 +77,10 @@ class Stats:
     chunks_written: int = 0
     embed_tokens: int = 0
     embeddings_missing: int = 0
+    # Fetches that hit the byte cap. Reported in the record and the summary, but
+    # `store.finish_run` builds its payload from named keys, so it is not written
+    # to `kb_ingest_runs` (no column for it).
+    pages_truncated: int = 0
     skip_reasons: Counter = field(default_factory=Counter)
     errors: list[str] = field(default_factory=list)
 
@@ -96,6 +100,7 @@ class Stats:
             "pages_unchanged": self.pages_unchanged,
             "pages_skipped": self.pages_skipped,
             "skip_reasons": dict(self.skip_reasons),
+            "pages_truncated": self.pages_truncated,
             "documents_written": self.documents_written,
             "chunks_written": self.chunks_written,
             "embed_tokens": self.embed_tokens,
@@ -181,6 +186,9 @@ async def _ingest_url(
         return Outcome.THIN.value
 
     stats.pages_fetched += 1
+    if result.truncated:
+        stats.pages_truncated += 1
+        logger.warning("truncated at the byte cap: %s", url)
     digest = store.content_hash(text)
 
     if dry_run:
@@ -369,6 +377,8 @@ def _summarise(record: dict, stats_note: str = "") -> None:
         "embed_tokens",
     ):
         print(f"  {key:<18} {record.get(key)}")
+    if record.get("pages_truncated"):
+        print(f"  pages_truncated    {record['pages_truncated']}")
     if record.get("skip_reasons"):
         print(f"  skip_reasons       {record['skip_reasons']}")
     if record.get("error_message"):
