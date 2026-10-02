@@ -83,6 +83,9 @@ class Outcome(str, Enum):
     THIN = "thin"
     PDF_UNSUPPORTED = "pdf_unsupported"
     PDF_UNREADABLE = "pdf_unreadable"
+    # Over the byte cap: a cut-off PDF is never parsed or embedded, because partial
+    # text from a policy document reads as the whole policy.
+    PDF_TRUNCATED = "pdf_truncated"
 
 
 # Outcomes worth another attempt: the host is up but transiently unhappy. A 4xx
@@ -225,6 +228,8 @@ async def conditional_get(
     `extract=False` is for callers that parse structure themselves: HTML comes
     back raw in `html`, with no main-text extraction and no THIN check.
     """
+    if want_links and not extract:
+        raise ValueError("want_links requires extract=True: links are only collected on the extracting path")
     if not rules.reachable:
         return FetchResult(Outcome.ROBOTS_UNAVAILABLE, url, detail=rules.error, status=rules.status)
     if not rules.allows(url):
@@ -293,29 +298,39 @@ async def conditional_get(
                 truncated = False
                 async for chunk in res.aiter_bytes():
                     body.extend(chunk)
-                    if len(body) >= max_bytes:
+                    # Strictly past the cap, so a body of exactly `max_bytes` is
+                    # complete and not flagged.
+                    if len(body) > max_bytes:
                         truncated = True
+                        del body[max_bytes:]
                         break
 
                 if _is_pdf(content_type):
+                    if truncated:
+                        return FetchResult(
+                            Outcome.PDF_TRUNCATED, url, final_url=current,
+                            status=res.status_code, content_type=content_type,
+                            detail=f"over {max_bytes} bytes", truncated=True,
+                        )
                     try:
                         text = extract_pdf_text(bytes(body))
                     except ImportError:
                         return FetchResult(
                             Outcome.PDF_UNSUPPORTED, url, final_url=current,
                             status=res.status_code, content_type=content_type,
-                            detail="pypdf not installed",
+                            detail="pypdf not installed", truncated=truncated,
                         )
                     except Exception as exc:
                         return FetchResult(
                             Outcome.PDF_UNREADABLE, url, final_url=current,
                             status=res.status_code, content_type=content_type,
-                            detail=type(exc).__name__,
+                            detail=type(exc).__name__, truncated=truncated,
                         )
                     if len(text.strip()) < MIN_USEFUL_CHARS:
                         return FetchResult(
                             Outcome.THIN, url, final_url=current, status=res.status_code,
                             content_type=content_type, detail=f"{len(text.strip())} chars",
+                            truncated=truncated,
                         )
                     return FetchResult(
                         Outcome.OK, url, final_url=current, text=text, status=res.status_code,
@@ -327,6 +342,7 @@ async def conditional_get(
                     return FetchResult(
                         Outcome.NON_HTML, url, final_url=current,
                         status=res.status_code, content_type=content_type,
+                        truncated=truncated,
                     )
 
                 html = bytes(body).decode(res.charset_encoding or "utf-8", errors="replace")
@@ -344,6 +360,7 @@ async def conditional_get(
                     return FetchResult(
                         Outcome.THIN, url, final_url=current, status=res.status_code,
                         content_type=content_type, detail=f"{len(text.strip())} chars",
+                        truncated=truncated,
                     )
 
                 links = (
