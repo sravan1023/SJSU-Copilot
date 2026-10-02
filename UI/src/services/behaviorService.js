@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseClient';
 
+const BEHAVIOR_FIELDS = ['response_tone', 'response_length', 'response_format', 'emoji_usage', 'priority_stack'];
 const COLUMNS = 'response_tone, response_length, response_format, emoji_usage, priority_stack, project_id, conversation_id';
 
 export const DEFAULT_PRIORITY_STACK = [
@@ -11,7 +12,11 @@ export const DEFAULT_PRIORITY_STACK = [
   'warmth',
 ];
 
-/** Default behavior settings (matches DB defaults). Used as the final fallback. */
+/**
+ * Default behavior settings — used only as a display fallback when the backend
+ * auto-detected behavior hasn't loaded yet. The backend's
+ * `generate_default_behavior()` is the authoritative source of defaults.
+ */
 export const DEFAULT_BEHAVIOR = {
   response_tone: 'friendly',
   response_length: 'balanced',
@@ -23,24 +28,38 @@ export const DEFAULT_BEHAVIOR = {
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 /**
- * Merge behavior settings from least-specific (base) to most-specific (override).
- * Only non-null fields from override replace fields in base.
+ * Merge only the non-null fields of `override` on top of `base`.
+ * Null/undefined fields in `override` leave `base` untouched.
  */
 function mergeSettings(base, override) {
   if (!override) return base;
   const merged = { ...base };
-  const fields = ['response_tone', 'response_length', 'response_format', 'emoji_usage', 'priority_stack'];
-  for (const field of fields) {
+  for (const field of BEHAVIOR_FIELDS) {
     if (override[field] != null) merged[field] = override[field];
   }
   return merged;
 }
 
+/**
+ * Pick only the non-null behavior fields from an updates object.
+ * Ensures we never write nulls back to the DB (null = "use auto").
+ */
+function pickNonNullFields(updates) {
+  const out = {};
+  for (const field of BEHAVIOR_FIELDS) {
+    if (updates?.[field] != null) out[field] = updates[field];
+  }
+  return out;
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Fetch the global (user-level) behavior settings.
- * Creates a default row if none exists.
+ * Fetch the global (user-level) behavior settings row.
+ *
+ * Returns only the manually-set fields (may be an empty object if the user
+ * has never overridden anything). Does NOT create a row if one is missing —
+ * absent rows just mean "use auto-detected defaults from the backend".
  */
 export async function fetchBehaviorSettings(userId) {
   const { data, error } = await supabase
@@ -49,38 +68,54 @@ export async function fetchBehaviorSettings(userId) {
     .eq('user_id', userId)
     .is('project_id', null)
     .is('conversation_id', null)
-    .single();
+    .maybeSingle();
 
-  if (error && error.code === 'PGRST116') {
-    const { data: inserted, error: insertErr } = await supabase
-      .from('behavior_settings')
-      .insert({ user_id: userId, project_id: null, conversation_id: null })
-      .select(COLUMNS)
-      .single();
-    if (insertErr) throw insertErr;
-    return inserted;
-  }
   if (error) throw error;
-  return data;
+  if (!data) return {};
+  return pickNonNullFields(data);
 }
 
 /**
- * Resolve the effective behavior for a given scope.
+ * Resolve the effective manual overrides for a given scope.
  *
  * Scope chain (highest specificity wins, missing fields fall through):
- *   conversation-level → project-level → user-level → DEFAULT_BEHAVIOR
+ *   conversation-level → project-level → user-level
+ *
+ * Returns ONLY manually-overridden fields. No defaults are filled in — the
+ * backend's `generate_default_behavior()` produces the auto-detected baseline,
+ * and the returned overrides are merged on top of that.
  *
  * @param {string} userId
  * @param {string|null} projectId
  * @param {string|null} conversationId
- * @returns {Promise<Object>} merged behavior settings object
+ * @returns {Promise<Object>} object containing only non-null override fields
  */
 export async function resolveEffectiveBehavior(userId, projectId, conversationId) {
-  // Fetch all rows for this user matching any of the relevant scopes
-  const { data, error } = await supabase
+  // Only the three scopes that can apply. This previously selected every
+  // behaviour row the user owned and filtered client-side, so the work grew
+  // with each project and conversation they had ever customised — on the
+  // critical path of every message.
+  const scopes = ['and(project_id.is.null,conversation_id.is.null)'];
+  if (projectId) scopes.push(`and(project_id.eq.${projectId},conversation_id.is.null)`);
+  if (conversationId) scopes.push(`conversation_id.eq.${conversationId}`);
+
+  let { data, error } = await supabase
     .from('behavior_settings')
     .select(COLUMNS)
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .or(scopes.join(','));
+
+  if (error) {
+    // Fall back to the unfiltered query rather than silently losing the user's
+    // settings. Losing them would not surface as an error anywhere — the caller
+    // treats a rejection as "no overrides" — so this degrades to slower rather
+    // than to wrong.
+    console.warn('Scoped behavior query failed, falling back to full fetch:', error.message);
+    ({ data, error } = await supabase
+      .from('behavior_settings')
+      .select(COLUMNS)
+      .eq('user_id', userId));
+  }
 
   if (error) throw error;
 
@@ -90,8 +125,9 @@ export async function resolveEffectiveBehavior(userId, projectId, conversationId
   const projectRow = projectId ? rows.find(r => r.project_id === projectId && r.conversation_id == null) : null;
   const convoRow = conversationId ? rows.find(r => r.conversation_id === conversationId) : null;
 
-  // Merge from least to most specific
-  let resolved = { ...DEFAULT_BEHAVIOR };
+  // Merge manual overrides from least to most specific. Start empty so we
+  // never return default values — only what the user has explicitly set.
+  let resolved = {};
   if (userRow) resolved = mergeSettings(resolved, userRow);
   if (projectRow) resolved = mergeSettings(resolved, projectRow);
   if (convoRow) resolved = mergeSettings(resolved, convoRow);
@@ -101,31 +137,22 @@ export async function resolveEffectiveBehavior(userId, projectId, conversationId
 
 /**
  * Update global (user-level) behavior settings.
+ *
+ * Only writes non-null fields from `updates`. If the row doesn't exist yet,
+ * it is inserted. Returns the persisted overrides (non-null fields only).
  */
 export async function updateBehaviorSettings(userId, updates) {
-  const { data, error } = await supabase
-    .from('behavior_settings')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('user_id', userId)
-    .is('project_id', null)
-    .is('conversation_id', null)
-    .select(COLUMNS)
-    .single();
-  if (error) throw error;
-  return data;
-}
+  const cleanUpdates = pickNonNullFields(updates);
+  if (Object.keys(cleanUpdates).length === 0) {
+    // Nothing to write — just return current state
+    return fetchBehaviorSettings(userId);
+  }
 
-/**
- * Upsert behavior settings for a specific scope (project or conversation).
- * Pass projectId OR conversationId (not both) to set that scope's override.
- * Pass neither to update the global user-level settings (same as updateBehaviorSettings).
- */
-export async function upsertScopedBehavior(userId, updates, { projectId = null, conversationId = null } = {}) {
   const row = {
     user_id: userId,
-    project_id: projectId,
-    conversation_id: conversationId,
-    ...updates,
+    project_id: null,
+    conversation_id: null,
+    ...cleanUpdates,
     updated_at: new Date().toISOString(),
   };
 
@@ -135,7 +162,94 @@ export async function upsertScopedBehavior(userId, updates, { projectId = null, 
     .select(COLUMNS)
     .single();
   if (error) throw error;
-  return data;
+  return pickNonNullFields(data);
+}
+
+/**
+ * Upsert behavior settings for a specific scope (project or conversation).
+ * Pass projectId OR conversationId (not both) to set that scope's override.
+ * Pass neither to update the global user-level settings.
+ *
+ * Only non-null fields from `updates` are written. Fields left null/undefined
+ * will fall through to the auto-detected baseline from the backend.
+ */
+export async function upsertScopedBehavior(userId, updates, { projectId = null, conversationId = null } = {}) {
+  const cleanUpdates = pickNonNullFields(updates);
+  if (Object.keys(cleanUpdates).length === 0) {
+    // Empty update — treat as a no-op rather than writing a bare row.
+    return {};
+  }
+
+  const row = {
+    user_id: userId,
+    project_id: projectId,
+    conversation_id: conversationId,
+    ...cleanUpdates,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from('behavior_settings')
+    .upsert(row, { onConflict: 'user_id,project_id,conversation_id' })
+    .select(COLUMNS)
+    .single();
+  if (error) throw error;
+  return pickNonNullFields(data);
+}
+
+/**
+ * Which scope the current conversation's overrides actually come from.
+ *
+ * Returns 'conversation' | 'project' | 'user'. Never throws: the caller uses
+ * this only to label a button, so a failure degrades to 'user' rather than
+ * breaking the panel.
+ *
+ * Lived inline in App.jsx until Phase 2. It is here because App.jsx reaching
+ * into `supabase` directly meant no adapter could intercept it, and for a
+ * principal with no user id it would have queried `user_id = null`.
+ */
+export async function detectActiveScope(userId, { projectId = null, conversationId = null } = {}) {
+  if (!userId || !conversationId) return 'user';
+  try {
+    const { data } = await supabase
+      .from('behavior_settings')
+      .select('project_id, conversation_id')
+      .eq('user_id', userId);
+
+    const rows = data || [];
+    if (rows.some(r => r.conversation_id === conversationId)) return 'conversation';
+    if (projectId && rows.some(r => r.project_id === projectId && !r.conversation_id)) return 'project';
+    return 'user';
+  } catch {
+    return 'user';
+  }
+}
+
+/**
+ * The stored override row for one scope, or null when none exists.
+ *
+ * Also previously inline in App.jsx. Same contract as above: never throws, and
+ * null means "this scope has no override", which is not an error.
+ */
+export async function fetchScopedBehavior(userId, { scope, scopeId } = {}) {
+  if (!userId || !scopeId) return null;
+  try {
+    let query = supabase
+      .from('behavior_settings')
+      .select(COLUMNS)
+      .eq('user_id', userId);
+
+    if (scope === 'project') {
+      query = query.eq('project_id', scopeId).is('conversation_id', null);
+    } else {
+      query = query.eq('conversation_id', scopeId);
+    }
+
+    const { data } = await query.maybeSingle();
+    return data || null;
+  } catch {
+    return null;
+  }
 }
 
 /**

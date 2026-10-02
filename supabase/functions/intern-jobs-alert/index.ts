@@ -16,14 +16,37 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
   });
 }
 
+/** Constant-time string compare, so a caller cannot probe the token byte by byte. */
+function tokensMatch(provided: string, expected: string): boolean {
+  const a = new TextEncoder().encode(provided);
+  const b = new TextEncoder().encode(expected);
+  // Compare a fixed number of bytes regardless of length, then fold the length
+  // difference into the result.
+  let diff = a.length ^ b.length;
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  }
+  return diff === 0;
+}
+
 function isAuthorized(request: Request): boolean {
   const expectedToken = Deno.env.get('PIPELINE_TRIGGER_TOKEN');
+  // Fail closed. This function runs the pipeline with SUPABASE_SERVICE_ROLE_KEY
+  // (see pipeline.ts), so an unset secret previously meant any unauthenticated
+  // POST could trigger a full service-role run.
   if (!expectedToken) {
-    return true;
+    console.error(
+      'PIPELINE_TRIGGER_TOKEN is not set; refusing to run the pipeline. ' +
+        'Set the secret with: supabase secrets set PIPELINE_TRIGGER_TOKEN=<value>',
+    );
+    return false;
   }
 
   const providedToken = request.headers.get('x-pipeline-token');
-  return providedToken === expectedToken;
+  if (!providedToken) return false;
+
+  return tokensMatch(providedToken, expectedToken);
 }
 
 Deno.serve(async (request: Request) => {

@@ -30,11 +30,15 @@ function jsonResponse(status: number, body: unknown): Response {
  * Replace this with your actual LLM provider call.
  */
 async function llmCall(systemPrompt: string, userPrompt: string): Promise<string> {
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? Deno.env.get('OPENAI_API_KEY');
-  if (!apiKey) throw new Error('No LLM API key configured');
+  // Each provider reads its own key. Previously a single `apiKey` was resolved
+  // as ANTHROPIC ?? OPENAI and then sent to whichever provider ran, so if the
+  // Anthropic branch had ever fallen through, the Anthropic key would have been
+  // sent to OpenAI as a bearer token.
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+  const openaiKey = Deno.env.get('OPENAI_API_KEY');
+  if (!anthropicKey && !openaiKey) throw new Error('No LLM API key configured');
 
   // Using Anthropic Claude as the extraction model
-  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (anthropicKey) {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -50,6 +54,12 @@ async function llmCall(systemPrompt: string, userPrompt: string): Promise<string
         messages: [{ role: 'user', content: userPrompt }],
       }),
     });
+    // Without this check a 429 or 5xx returned '{}' -- extraction silently
+    // produced zero memories with no signal anywhere.
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new Error(`Anthropic API error ${resp.status}: ${body.slice(0, 500)}`);
+    }
     const data = await resp.json();
     return data.content?.[0]?.text ?? '{}';
   }
@@ -59,7 +69,7 @@ async function llmCall(systemPrompt: string, userPrompt: string): Promise<string
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
+      'Authorization': `Bearer ${openaiKey}`,
     },
     body: JSON.stringify({
       model: 'gpt-4o-mini',
@@ -70,6 +80,10 @@ async function llmCall(systemPrompt: string, userPrompt: string): Promise<string
       response_format: { type: 'json_object' },
     }),
   });
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`OpenAI API error ${resp.status}: ${body.slice(0, 500)}`);
+  }
   const data = await resp.json();
   return data.choices?.[0]?.message?.content ?? '{}';
 }

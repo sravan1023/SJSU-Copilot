@@ -1,51 +1,51 @@
+import os
+
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
+import uvicorn
 
-app = FastAPI()
+load_dotenv()
 
-# allow frontend (React) to talk to backend
+from logging_config import setup_logging
+
+setup_logging()
+
+from runtime import lifespan
+from routers import chat, professors, jobs, telemetry, guest, admin_kb
+
+app = FastAPI(title="SJSU Copilot API", lifespan=lifespan)
+
+# allow_origins=["*"] together with allow_credentials=True is rejected by
+# browsers for credentialed requests and is far wider than this app needs. Set
+# ALLOWED_ORIGINS to a comma-separated list in deployment.
+DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", DEFAULT_ORIGINS).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
+app.include_router(chat.router, prefix="/api")
+app.include_router(professors.router, prefix="/api")
+app.include_router(jobs.router, prefix="/api")
+app.include_router(telemetry.router, prefix="/api")
+app.include_router(guest.router, prefix="/api")
+app.include_router(admin_kb.router, prefix="/api")
+
+
 @app.get("/")
-def home():
-    return {"message": "Backend is running"}
+def health():
+    return {"status": "ok", "service": "sjsu-copilot-backend"}
 
 
-@app.post("/chat")
-def chat(query: dict):
-    question = query.get("message", "").lower()
-
-    # FIX: header=1 (because your Excel has extra top row)
-    df = pd.read_excel("data.xlsx", header=1)
-
-    results = []
-
-    for _, row in df.iterrows():
-        try:
-            name = str(row.get("Name", ""))
-            days = str(row.get("Day(s)", ""))
-            time = str(row.get("Time (s)", ""))
-
-            # some columns are messy → safe access
-            walk = str(row.iloc[3]) if len(row) > 3 else ""
-
-            text = f"{name} is available on {days} at {time}. {walk}"
-
-            # simple keyword match
-            if any(word in text.lower() for word in question.split()):
-                results.append(text)
-
-        except Exception as e:
-            continue  # skip bad rows
-
-    if not results:
-        return {"response": "No matching professor found."}
-
-    return {"response": "\n".join(results[:5])}
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

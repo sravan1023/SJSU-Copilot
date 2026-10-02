@@ -9,7 +9,7 @@ import { supabase } from '../supabaseClient';
 export async function fetchConversations({ limit = 20, cursor = null } = {}) {
   let query = supabase
     .from('conversations')
-    .select('id, title, last_message_preview, updated_at, project_id')
+    .select('id, title, last_message_preview, updated_at, project_id, audience')
     .is('project_id', null)
     .order('updated_at', { ascending: false })
     .limit(limit);
@@ -27,9 +27,12 @@ export async function fetchConversations({ limit = 20, cursor = null } = {}) {
  * Create a new conversation. Title can be null (auto-generated later).
  * Pass projectId to create inside a project.
  */
-export async function createConversation(userId, title = null, projectId = null) {
+export async function createConversation(userId, title = null, projectId = null, audience = null) {
   const row = { user_id: userId, title };
   if (projectId) row.project_id = projectId;
+  // A snapshot of which experience produced this thread, so a conversation
+  // started as an alum still reads as one after the person switches audience.
+  if (audience) row.audience = audience;
   const { data, error } = await supabase
     .from('conversations')
     .insert(row)
@@ -91,31 +94,26 @@ export async function fetchMessages({ conversationId, limit = 30, cursor = null 
 
   const { data, error } = await query;
   if (error) throw error;
-  // Reverse so oldest is first (natural chat order)
   return data.reverse();
 }
 
 /**
- * Insert a single message and update the parent conversation.
+ * Insert a single message. The parent conversation's last_message_preview and
+ * updated_at are set by the trg_set_conversation_preview trigger
+ * (supabase/migrations/20260916000500_message_preview_trigger.sql), so this is
+ * one round trip rather than two.
  */
 export async function insertMessage({ conversationId, role, content }) {
   const { data, error } = await supabase
     .from('messages')
-    .insert({ conversation_id: conversationId, role, content })
+    .insert({
+      conversation_id: conversationId,
+      role,
+      content,
+    })
     .select()
     .single();
   if (error) throw error;
-
-  // Update conversation sidebar preview
-  const preview = content.length > 80 ? content.slice(0, 80) + '...' : content;
-  await supabase
-    .from('conversations')
-    .update({
-      last_message_preview: preview,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', conversationId);
-
   return data;
 }
 
@@ -158,7 +156,7 @@ export async function autoTitleIfNeeded(conversationId, firstUserMessage, titleG
     .eq('id', conversationId)
     .single();
 
-  if (convo?.title) return; // already titled
+  if (convo?.title) return null; // already titled
 
   // Try AI-generated title, fall back to truncated message
   let title = null;
@@ -180,4 +178,7 @@ export async function autoTitleIfNeeded(conversationId, firstUserMessage, titleG
     .from('conversations')
     .update({ title })
     .eq('id', conversationId);
+
+  // Returned so callers can patch their local list instead of refetching it.
+  return title;
 }

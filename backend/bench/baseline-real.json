@@ -1,0 +1,326 @@
+{
+  "generated_at": "2026-09-22T02:57:21+00:00",
+  "inputs": [
+    "bench\\results\\real-c1.jsonl"
+  ],
+  "groups": [
+    {
+      "mode": "real",
+      "concurrency": 1,
+      "model": "quality",
+      "n": 8,
+      "joined_to_server_log": 8,
+      "errors": {},
+      "metrics": {
+        "client.headers_ms": {
+          "label": "response headers",
+          "n": 8,
+          "p50": 6.8,
+          "p95": 51.5,
+          "p99": 70.4
+        },
+        "client.first_status_ms": {
+          "label": "first status frame",
+          "n": 8,
+          "p50": 7.2,
+          "p95": 52.0,
+          "p99": 70.9
+        },
+        "client.first_token_ms": {
+          "label": "first answer token",
+          "n": 8,
+          "p50": 5476.2,
+          "p95": 7211.9,
+          "p99": 7785.5
+        },
+        "client.done_ms": {
+          "label": "answer complete",
+          "n": 8,
+          "p50": 6609.3,
+          "p95": 8435.2,
+          "p99": 9102.8
+        },
+        "server.total_ms": {
+          "label": "server total",
+          "n": 8,
+          "p50": 6602.1,
+          "p95": 8408.4,
+          "p99": 9067.4
+        },
+        "server.behavior_compute": {
+          "label": "behaviour settings",
+          "n": 8,
+          "p50": 0.1,
+          "p95": 0.2,
+          "p99": 0.2
+        },
+        "server.rag.total": {
+          "label": "retrieval, total",
+          "n": 8,
+          "p50": 4992.6,
+          "p95": 5740.0,
+          "p99": 5959.9
+        },
+        "server.rag.rewrite": {
+          "label": "query rewrite",
+          "n": 1,
+          "p50": 421.7,
+          "p95": 421.7,
+          "p99": 421.7
+        },
+        "server.rag.search.gather": {
+          "label": "search (both, wall)",
+          "n": 7,
+          "p50": 3977.0,
+          "p95": 4270.1,
+          "p99": 4288.2
+        },
+        "server.rag.crawl.total": {
+          "label": "page fetch (wall)",
+          "n": 7,
+          "p50": 1008.4,
+          "p95": 1952.6,
+          "p99": 2174.4
+        },
+        "server.rag.extract": {
+          "label": "HTML extract (summed)",
+          "n": 7,
+          "p50": 329.6,
+          "p95": 1453.7,
+          "p99": 1780.9
+        },
+        "server.rag.assemble": {
+          "label": "context assembly",
+          "n": 7,
+          "p50": 0.0,
+          "p95": 0.1,
+          "p99": 0.1
+        },
+        "server.llm.ttft": {
+          "label": "provider time to first token",
+          "n": 8,
+          "p50": 563.0,
+          "p95": 1511.2,
+          "p99": 1815.3
+        },
+        "server.llm.stream": {
+          "label": "provider streaming",
+          "n": 8,
+          "p50": 913.8,
+          "p95": 1825.9,
+          "p99": 1981.0
+        }
+      },
+      "segments": {
+        "conversation": {
+          "existing": {
+            "n": 2,
+            "first_token_ms": {
+              "n": 2,
+              "p50": 3180.4,
+              "p95": 5608.8,
+              "p99": 5824.6
+            },
+            "done_ms": {
+              "n": 2,
+              "p50": 3555.2,
+              "p95": 6238.2,
+              "p99": 6476.7
+            }
+          },
+          "new": {
+            "n": 6,
+            "first_token_ms": {
+              "n": 6,
+              "p50": 5476.2,
+              "p95": 7416.8,
+              "p99": 7826.5
+            },
+            "done_ms": {
+              "n": 6,
+              "p50": 6782.7,
+              "p95": 8673.6,
+              "p99": 9150.5
+            }
+          }
+        },
+        "retrieval": {
+          "no-rag": {
+            "n": 1,
+            "first_token_ms": {
+              "n": 1,
+              "p50": 482.2,
+              "p95": 482.2,
+              "p99": 482.2
+            },
+            "done_ms": {
+              "n": 1,
+              "p50": 574.1,
+              "p95": 574.1,
+              "p99": 574.1
+            }
+          },
+          "rag": {
+            "n": 7,
+            "first_token_ms": {
+              "n": 7,
+              "p50": 5511.7,
+              "p95": 7314.4,
+              "p99": 7806.0
+            },
+            "done_ms": {
+              "n": 7,
+              "p50": 6682.3,
+              "p95": 8554.4,
+              "p99": 9126.6
+            }
+          }
+        },
+        "audience": {
+          "alumni": {
+            "n": 2,
+            "first_token_ms": {
+              "n": 2,
+              "p50": 5695.1,
+              "p95": 5860.3,
+              "p99": 5874.9
+            },
+            "done_ms": {
+              "n": 2,
+              "p50": 6609.3,
+              "p95": 6675.0,
+              "p99": 6680.8
+            }
+          },
+          "faculty": {
+            "n": 2,
+            "first_token_ms": {
+              "n": 2,
+              "p50": 4205.6,
+              "p95": 7556.6,
+              "p99": 7854.4
+            },
+            "done_ms": {
+              "n": 2,
+              "p50": 4921.9,
+              "p95": 8834.9,
+              "p99": 9182.7
+            }
+          },
+          "guest": {
+            "n": 2,
+            "first_token_ms": {
+              "n": 2,
+              "p50": 5429.8,
+              "p95": 5439.7,
+              "p99": 5440.6
+            },
+            "done_ms": {
+              "n": 2,
+              "p50": 6175.2,
+              "p95": 6814.3,
+              "p99": 6871.1
+            }
+          },
+          "student": {
+            "n": 2,
+            "first_token_ms": {
+              "n": 2,
+              "p50": 5371.2,
+              "p95": 5829.5,
+              "p99": 5870.2
+            },
+            "done_ms": {
+              "n": 2,
+              "p50": 6530.0,
+              "p95": 6847.8,
+              "p99": 6876.0
+            }
+          }
+        },
+        "kind": {
+          "faq": {
+            "n": 3,
+            "first_token_ms": {
+              "n": 3,
+              "p50": 5418.8,
+              "p95": 5502.4,
+              "p99": 5509.8
+            },
+            "done_ms": {
+              "n": 3,
+              "p50": 6883.1,
+              "p95": 6885.1,
+              "p99": 6885.3
+            }
+          },
+          "followup": {
+            "n": 1,
+            "first_token_ms": {
+              "n": 1,
+              "p50": 5878.6,
+              "p95": 5878.6,
+              "p99": 5878.6
+            },
+            "done_ms": {
+              "n": 1,
+              "p50": 6536.3,
+              "p95": 6536.3,
+              "p99": 6536.3
+            }
+          },
+          "fresh": {
+            "n": 2,
+            "first_token_ms": {
+              "n": 2,
+              "p50": 6904.6,
+              "p95": 7826.5,
+              "p99": 7908.4
+            },
+            "done_ms": {
+              "n": 2,
+              "p50": 7723.3,
+              "p95": 9115.1,
+              "p99": 9238.8
+            }
+          },
+          "long": {
+            "n": 1,
+            "first_token_ms": {
+              "n": 1,
+              "p50": 482.2,
+              "p95": 482.2,
+              "p99": 482.2
+            },
+            "done_ms": {
+              "n": 1,
+              "p50": 574.1,
+              "p95": 574.1,
+              "p99": 574.1
+            }
+          },
+          "restricted": {
+            "n": 1,
+            "first_token_ms": {
+              "n": 1,
+              "p50": 5440.8,
+              "p95": 5440.8,
+              "p99": 5440.8
+            },
+            "done_ms": {
+              "n": 1,
+              "p50": 5465.2,
+              "p95": 5465.2,
+              "p99": 5465.2
+            }
+          }
+        }
+      }
+    }
+  ],
+  "not_measured": {
+    "persistence": "Supabase saves happen in the browser; measured there by UI/src/services/telemetryService.ts (marks user_saved, assistant_saved), not by this harness.",
+    "guest_vs_registered": "No guest sessions exist yet.",
+    "deployment": "No deployment config yet (warm/cold instances, region, proxy buffering)."
+  }
+}

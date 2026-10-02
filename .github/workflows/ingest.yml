@@ -1,0 +1,111 @@
+# Weekly knowledge-base refresh.
+#
+# **This workflow is dormant, and that is expected rather than a bug.** There is
+# no deployment of this app yet, so there is no URL for it to call. It ships now
+# so that the day a host exists, this is one repository secret away from working:
+# set the API_BASE variable and the KB_INGEST_TOKEN secret, and it starts running.
+#
+# It will fail loudly on its first scheduled run until those are set. The `if` on
+# the job prevents that: with no API_BASE configured it is skipped, not failed, so
+# a dormant workflow does not email a red X every Monday.
+#
+# API_BASE is a repository *variable*, not a secret -- partly because a base URL
+# is not sensitive, and partly because the `secrets` context is not available in
+# a job-level `if` at all (only `github`, `needs`, `vars` and `inputs` are), so a
+# gate written against `secrets.API_BASE` would silently always be false.
+#
+# The token belongs to an account holding the `run_ingestion` grant in
+# public.admin_grants. A guest token cannot be used -- guests can never hold a
+# grant -- which is the point of gating the endpoint on a capability rather than
+# on being signed in.
+name: knowledge base ingest
+
+on:
+  schedule:
+    # 09:00 UTC Monday -- 02:00 Pacific, which is both off-peak for SJSU's
+    # servers and well clear of the registration-morning traffic the crawler
+    # should stay out of the way of.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Ignore etag and content hash; re-embed everything"
+        type: boolean
+        default: false
+      sources:
+        description: "Comma-separated seed URLs, or blank for every enabled source"
+        type: string
+        default: ""
+
+concurrency:
+  # Two overlapping crawls would double the request rate against sjsu.edu, which
+  # is the one thing the politeness budget exists to prevent.
+  group: kb-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    if: vars.API_BASE != ''
+    timeout-minutes: 30
+    steps:
+      - name: Queue an ingestion run
+        env:
+          API_BASE: ${{ vars.API_BASE }}
+          TOKEN: ${{ secrets.KB_INGEST_TOKEN }}
+          FORCE: ${{ inputs.force || false }}
+          SOURCES: ${{ inputs.sources }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TOKEN:-}" ]; then
+            echo "KB_INGEST_TOKEN is not set; nothing to authenticate with." >&2
+            exit 1
+          fi
+
+          # Build the source list as a JSON array, or null for "every enabled".
+          if [ -n "${SOURCES:-}" ]; then
+            sources=$(printf '%s' "$SOURCES" | jq -R 'split(",") | map(ltrimstr(" ") | rtrimstr(" "))')
+          else
+            sources=null
+          fi
+
+          body=$(jq -nc --argjson sources "$sources" --argjson force "${FORCE:-false}" \
+            '{sources: $sources, force: $force}')
+
+          # The endpoint queues and returns; it does not crawl inline, because
+          # catalog.sjsu.edu at crawl-delay 120 is a ~10-hour job and no HTTP
+          # request survives that. A worker drains the queue.
+          code=$(curl -sS -o response.json -w '%{http_code}' \
+            -X POST "${API_BASE%/}/api/admin/kb/ingest" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$body")
+
+          echo "HTTP $code"
+          cat response.json
+          echo
+
+          # 403 means the token's account is missing the run_ingestion grant and
+          # 503 means admin_grants was unreadable. Both are real failures worth a
+          # red X, so no status code is swallowed here.
+          if [ "$code" != "200" ]; then
+            echo "ingestion request failed" >&2
+            exit 1
+          fi
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Knowledge base ingest"
+            echo
+            if [ -f response.json ]; then
+              echo '```json'
+              cat response.json
+              echo
+              echo '```'
+            else
+              echo "No response recorded."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

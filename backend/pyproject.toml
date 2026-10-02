@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+# The app imports its own modules absolutely (`from services.x import ...`),
+# so run from backend/ with backend/ on the path.
+pythonpath = ["."]
+testpaths = ["tests"]
