@@ -75,24 +75,36 @@ def _rx(*alternatives: str) -> re.Pattern:
 # Each alternative is word-bounded. Windows are bounded (`{0,n}`) and nothing
 # is nested-quantified, so a long message cannot make matching slow.
 _CRISIS = _rx(
-    # Suicide. Excluded: "suicide squad" (the film), "suicide mission".
-    r"\bsuicid(?:e|al|ally)\b(?!\s+(?:squad|mission|prevention\s+month))",
+    # Suicide, with the misspellings people type when distressed ("sucidal",
+    # "suicde", "suicidel"). Excluded: "suicide squad" (the film), "suicide mission".
+    r"\b(?:suicid|sucid|suicd|suisid|suiced?)(?:e|al|ally|el)\b(?!\s+(?:squad|mission|prevention\s+month))",
+    r"\bunaliv(?:e|ed|ing)\b",
     # Hurting oneself. "kill me" is NOT here, so "this exam is killing me" and
     # "kill the process" stay clear; the reflexive "myself" is the signal.
-    r"\b(?:kill|killing|hurt|hurting|harm|harming|cut|cutting|starve|starving|punish|punishing)\s+myself\b",
-    r"\bkms\b",
+    # "my self" with a space is how it gets typed on a phone.
+    r"\b(?:kill|killing|hurt|hurting|harm|harming|cut|cutting|starve|starving|punish|punishing"
+    r"|hang|hanging|hung|hanged|shoot|shooting|shot|drown|drowning|drowned|unalive|unaliving"
+    r"|off|offing|stab|stabbing|burn|burning|poison|poisoning)\s+(?:myself|my\s+self)\b",
+    # Not after a digit: "3 kms from campus" is a distance.
+    r"(?<!\d)(?<!\d\s)\bkms\b",
     r"\bself[- ]?(?:harm|injur\w*|mutilat\w*)",
     # Wanting to die. "dying to know" cannot match: `die` is word-bounded and
     # "dying" is a different word. "going to die" is left out on purpose: it is
     # almost always hyperbole ("I'm going to die if I fail").
-    r"\b(?:want|wanted|wants|wanna|ready|planning|trying|thinking\s+(?:of|about))\s+(?:to\s+)?(?:die|be\s+dead|end\s+my\s+life|end\s+it\s+all|end\s+it)\b",
+    r"\b(?:want|wanted|wants|wanna|ready|planning|trying|thinking\s+(?:of|about))\s+(?:to\s+)?(?:die|be\s+dead|end\s+my\s+life|end(?:ing)?\s+it(?:\s+all)?)\b",
+    # "going to end it tonight". "going to die" stays out (hyperbole), but "end it"
+    # after an intent phrase is not an idiom, so it is allowed here.
+    r"\b(?:going\s+to|gonna|about\s+to|have\s+to|need\s+to)\s+end(?:ing)?\s+it(?:\s+all)?\b",
     r"\b(?:end|ending|take|taking)\s+(?:my|my\s+own)\s+(?:own\s+)?life\b",
-    r"\bend\s+it\s+all\b",
+    r"\bend(?:ing)?\s+it\s+all\b",
     r"\bwish\s+(?:i|that\s+i)\s+(?:was|were|could|would)\s+(?:dead|die|never\s+born|never\s+wake\s+up|not\s+here|not\s+alive)\b",
+    r"\bwish\s+(?:i|that\s+i)\s+(?:wasn'?t|weren'?t|was\s+not|were\s+not)\s+(?:alive|here|born|around)\b",
+    r"\bwish\s+(?:i|that\s+i)(?:'d|\s+had|\s+would)?\s+never\s+(?:been\s+born|existed)\b",
     r"\bbetter\s+off\s+(?:dead|without\s+me)\b",
     r"\b(?:no|not\s+any)\s+(?:reason|point)\s+(?:to|in)\s+(?:live|living|go\s+on|going\s+on|being\s+alive)\b",
-    r"\bnot\s+worth\s+living\b",
-    r"\bdon'?t\s+want\s+to\s+(?:be\s+here|live|be\s+alive|exist|wake\s+up)\b",
+    r"\bpoint\s+(?:of|in|to)\s+(?:living|going\s+on|being\s+alive)\b",
+    r"\b(?:not|isn'?t|ain'?t|aint)\s+worth\s+living\b",
+    r"\bdo(?:n'?t|\s+not)\s+(?:want\s+to|wanna)\s+(?:be\s+here|live|be\s+alive|exist|wake\s+up)\b",
     r"\b(?:no\s*one|nobody)\s+would\s+(?:miss|care\s+if)\b",
     # "can't take it anymore" is ambiguous (exams) but also how people say it
     # when it is serious; the card is cheap, so it is included.
@@ -109,10 +121,11 @@ _CRISIS = _rx(
     r"\bin\s+(?:immediate\s+|serious\s+|real\s+)?danger\b(?!\s+of\b)",
     r"\b(?:afraid|scared|fear|fearing)\s+for\s+my\s+(?:life|safety)\b",
     r"\bthreaten\w*\s+(?:to\s+)?(?:kill|hurt)\b",
-    # Abuse and assault. The bare noun "abuse" is excluded (substance abuse,
-    # "abuse detection" in a CS question); the qualified and verb forms are not.
-    r"\b(?:domestic|physical|emotional|sexual|verbal|child|partner)\s+abuse\b",
-    r"\babus(?:ed|ive|ing|er)\b",
+    # Abuse and assault. Bare "abuse" and its forms fire ("my partner abuses me",
+    # "I'm a victim of abuse"), except right after substance/drug/alcohol and in
+    # "abuse detection" (a CS topic).
+    r"(?<!substance\s)(?<!substance-)(?<!drug\s)(?<!drug-)(?<!alcohol\s)(?<!alcohol-)"
+    r"\babus(?:e[sd]?|ive|ing|er)\b(?!\s+detection)",
     r"\bdomestic\s+violence\b|\bintimate\s+partner\s+violence\b|\bsexual\s+violence\b",
     # "assault rifle/weapon" is excluded.
     r"\bassault(?:ed|s)?\b(?!\s+(?:rifle|weapon)s?\b)",
@@ -125,6 +138,9 @@ _CRISIS = _rx(
     # that need a person doing it.
     r"\b(?:hitting|beating|choking|strangling)\s+me\b",
     r"\b(?:he|she|they)\s+(?:hits|hit|beats|beat|choked|strangled)\s+me\b",
+    # "my dad beats me": any one word before the verb, except the idioms
+    # "that beats me" / "it hits me" / "this kicks me".
+    r"\b(?!(?:that|it|this|what|which|who)\s)\w+\s+(?:hits|beats|chokes|kicks)\s+me\b",
 )
 
 # Basic needs. Excluded: bare "no food" ("no food allowed in the library"),
@@ -132,6 +148,9 @@ _CRISIS = _rx(
 # benefit). First-person phrasing is what separates need from curiosity.
 _BASIC_NEEDS = _rx(
     r"\b(?:i|we)\s+(?:have|has|got|had)\s+(?:no|not\s+enough)\s+food\b",
+    r"\b(?:i|we)\s+(?:don'?t|do\s+not)\s+have\s+(?:any|enough)\s+food\b",
+    r"\b(?:i|we)\s+(?:have|has|got|had)\s+(?:no|not\s+enough)\s+money\s+(?:for|to\s+buy)\s+(?:food|groceries|meals?|rent)\b",
+    r"\b(?:living|live|lives)\s+in\s+(?:my|a|our)\s+car\b",
     r"\bnothing\s+to\s+eat\b",
     r"\bhaven'?t\s+eaten\b",
     r"\b(?:can'?t|cannot|can\s+not|unable\s+to|couldn'?t)\s+afford\s+(?:food|groceries|meals?|to\s+eat|rent|housing|to\s+pay\s+rent)\b",

@@ -130,6 +130,33 @@ CRISIS_PHRASES = [
     "he threatened to kill me",
     "thanks, I want to die",
     "WANT TO DIE",
+    "I'm going to hang myself",
+    "i'll shoot myself",
+    "I want to drown myself",
+    "I'm going to unalive myself",
+    "thinking about unaliving",
+    "i want to off myself",
+    "I'm going to kill my self",
+    "ending it all",
+    "I'm going to end it tonight",
+    "I don't wanna live anymore",
+    "I do not want to live",
+    "life isn't worth living",
+    "my life aint worth living",
+    "I wish I wasn't alive",
+    "I wish I'd never been born",
+    "what's the point of living",
+    "no point in living",
+    "my partner abuses me",
+    "I'm a victim of abuse",
+    "my boyfriend hits me",
+    "my dad beats me",
+    "my brother chokes me",
+    "I feel sucidal",
+    "i think about suicde",
+    "feeling suicidel",
+    "kms",
+    "I want to kms",
 ]
 
 BASIC_NEEDS_PHRASES = [
@@ -145,6 +172,9 @@ BASIC_NEEDS_PHRASES = [
     "how do I apply for CalFresh",
     "I'm dealing with food insecurity",
     "my landlord kicked out of my apartment",
+    "I don't have any food",
+    "I have no money for food",
+    "I'm living in my car",
 ]
 
 # Each of these names an exclusion documented in services/crisis_card.py.
@@ -169,6 +199,11 @@ NEGATIVE_PHRASES = [
     "I'm going to die if I fail this class",
     "grape juice",
     "make that shorter",
+    "my apartment is 3 kms from campus",
+    "it is 12kms away",
+    "drug abuse prevention seminar",
+    "alcohol abuse resources on campus",
+    "it hits me every time",
     "",
 ]
 
