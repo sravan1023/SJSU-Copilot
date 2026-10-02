@@ -12,8 +12,9 @@ an Answer in one of three modes:
              crisis card), so a false positive costs a paragraph of text and
              never blocks a legitimate answer.
 
-ROUTERS is empty until a router is added; with it empty, `answer` returns None
-and the chat stream behaves exactly as before.
+ROUTERS starts with the crisis card, which abstains while its flag is off, so
+the chat stream behaves exactly as before until a router is enabled. With
+ROUTERS empty, `answer` returns None.
 
 Contracts the seam enforces, so one bad router cannot fail or corrupt a turn:
 
@@ -39,6 +40,7 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Literal
 
 import observability
+from services import crisis_card
 from services.web_search import prepare_rag_query
 
 logger = logging.getLogger(__name__)
@@ -76,8 +78,9 @@ class Answer:
 
 Router = Callable[[RouterInput], Awaitable[Answer | None]]
 
-# Ordered; the first non-None answer wins.
-ROUTERS: list[Router] = []
+# Ordered; the first non-None answer wins. The crisis card goes first so no
+# data router can pre-empt it; it abstains unless CRISIS_CARD_ENABLED is on.
+ROUTERS: list[Router] = [crisis_card.route]
 
 
 def build_input(
