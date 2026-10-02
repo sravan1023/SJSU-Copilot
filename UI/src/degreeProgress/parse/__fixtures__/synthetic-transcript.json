@@ -1,0 +1,432 @@
+[
+ {
+  "page": 1,
+  "y": 786,
+  "items": [
+   {
+    "str": "Unofficial Transcript - Sample University",
+    "x": 36
+   }
+  ],
+  "text": "Unofficial Transcript - Sample University"
+ },
+ {
+  "page": 1,
+  "y": 772,
+  "items": [
+   {
+    "str": "Pat Q Fabricated",
+    "x": 36
+   }
+  ],
+  "text": "Pat Q Fabricated"
+ },
+ {
+  "page": 1,
+  "y": 758,
+  "items": [
+   {
+    "str": "Student ID: 000000000",
+    "x": 36
+   }
+  ],
+  "text": "Student ID: 000000000"
+ },
+ {
+  "page": 1,
+  "y": 744,
+  "items": [
+   {
+    "str": "Date of Birth: 01/02/2000",
+    "x": 36
+   }
+  ],
+  "text": "Date of Birth: 01/02/2000"
+ },
+ {
+  "page": 1,
+  "y": 730,
+  "items": [
+   {
+    "str": "FALL SEMESTER 2022 / MAJOR: MS Computer Science",
+    "x": 36
+   }
+  ],
+  "text": "FALL SEMESTER 2022 / MAJOR: MS Computer Science"
+ },
+ {
+  "page": 1,
+  "y": 716,
+  "items": [
+   {
+    "str": "UA",
+    "x": 192
+   },
+   {
+    "str": "UG",
+    "x": 222
+   },
+   {
+    "str": "UE",
+    "x": 252
+   },
+   {
+    "str": "GR",
+    "x": 276
+   },
+   {
+    "str": "GP",
+    "x": 300
+   },
+   {
+    "str": "GPA",
+    "x": 330
+   }
+  ],
+  "text": "UA UG UE GR GP GPA"
+ },
+ {
+  "page": 1,
+  "y": 702,
+  "items": [
+   {
+    "str": "CS 157C NoSQL Database Systems",
+    "x": 36
+   },
+   {
+    "str": "3.0",
+    "x": 234
+   },
+   {
+    "str": "3.0",
+    "x": 264
+   },
+   {
+    "str": "3.0 A",
+    "x": 294
+   },
+   {
+    "str": "12.0",
+    "x": 336
+   }
+  ],
+  "text": "CS 157C NoSQL Database Systems 3.0 3.0 3.0 A 12.0"
+ },
+ {
+  "page": 1,
+  "y": 688,
+  "items": [
+   {
+    "str": "MATH 30P Calculus Prep",
+    "x": 36
+   },
+   {
+    "str": "3.0",
+    "x": 186
+   },
+   {
+    "str": "3.0",
+    "x": 216
+   },
+   {
+    "str": "3.0 B+",
+    "x": 246
+   },
+   {
+    "str": "9.9",
+    "x": 294
+   }
+  ],
+  "text": "MATH 30P Calculus Prep 3.0 3.0 3.0 B+ 9.9"
+ },
+ {
+  "page": 1,
+  "y": 674,
+  "items": [
+   {
+    "str": "ENGL 1A First Year Writing",
+    "x": 36
+   },
+   {
+    "str": "3.0",
+    "x": 210
+   },
+   {
+    "str": "0.0",
+    "x": 240
+   },
+   {
+    "str": "3.0 CR",
+    "x": 270
+   }
+  ],
+  "text": "ENGL 1A First Year Writing 3.0 0.0 3.0 CR"
+ },
+ {
+  "page": 1,
+  "y": 660,
+  "items": [
+   {
+    "str": "SEMESTER TOTAL:",
+    "x": 36
+   },
+   {
+    "str": "9.0",
+    "x": 192
+   },
+   {
+    "str": "6.0",
+    "x": 222
+   },
+   {
+    "str": "9.0",
+    "x": 252
+   },
+   {
+    "str": "21.9 3.650",
+    "x": 294
+   }
+  ],
+  "text": "SEMESTER TOTAL: 9.0 6.0 9.0 21.9 3.650"
+ },
+ {
+  "page": 1,
+  "y": 646,
+  "items": [
+   {
+    "str": "SPRING SEMESTER 2023 / MAJOR: MS Computer Science",
+    "x": 36
+   }
+  ],
+  "text": "SPRING SEMESTER 2023 / MAJOR: MS Computer Science"
+ },
+ {
+  "page": 1,
+  "y": 632,
+  "items": [
+   {
+    "str": "CS 146 Data Structures and Algorithms",
+    "x": 36
+   },
+   {
+    "str": "3.0",
+    "x": 276
+   },
+   {
+    "str": "0.0",
+    "x": 306
+   },
+   {
+    "str": "0.0 W",
+    "x": 336
+   }
+  ],
+  "text": "CS 146 Data Structures and Algorithms 3.0 0.0 0.0 W"
+ },
+ {
+  "page": 1,
+  "y": 618,
+  "items": [
+   {
+    "str": "CS 151 Object Oriented Design",
+    "x": 36
+   },
+   {
+    "str": "3.0",
+    "x": 228
+   },
+   {
+    "str": "3.0",
+    "x": 258
+   },
+   {
+    "str": "0.0 NC",
+    "x": 288
+   }
+  ],
+  "text": "CS 151 Object Oriented Design 3.0 3.0 0.0 NC"
+ },
+ {
+  "page": 1,
+  "y": 604,
+  "items": [
+   {
+    "str": "CS 160 Software Engineering",
+    "x": 36
+   },
+   {
+    "str": "3.0",
+    "x": 216
+   },
+   {
+    "str": "3.0",
+    "x": 246
+   },
+   {
+    "str": "3.0 I",
+    "x": 276
+   }
+  ],
+  "text": "CS 160 Software Engineering 3.0 3.0 3.0 I"
+ },
+ {
+  "page": 1,
+  "y": 590,
+  "items": [
+   {
+    "str": "CS 171 Fundamentals of Things",
+    "x": 36
+   },
+   {
+    "str": "3.0",
+    "x": 228
+   },
+   {
+    "str": "3.0",
+    "x": 258
+   },
+   {
+    "str": "3.0 RP",
+    "x": 288
+   }
+  ],
+  "text": "CS 171 Fundamentals of Things 3.0 3.0 3.0 RP"
+ },
+ {
+  "page": 1,
+  "y": 576,
+  "items": [
+   {
+    "str": "Page 1 of 2 footer thing",
+    "x": 36
+   }
+  ],
+  "text": "Page 1 of 2 footer thing"
+ },
+ {
+  "page": 2,
+  "y": 786,
+  "items": [
+   {
+    "str": "SUMMER SEMESTER 2023",
+    "x": 36
+   }
+  ],
+  "text": "SUMMER SEMESTER 2023"
+ },
+ {
+  "page": 2,
+  "y": 772,
+  "items": [
+   {
+    "str": "CS 100W Technical Writing",
+    "x": 36
+   },
+   {
+    "str": "3.0",
+    "x": 204
+   },
+   {
+    "str": "3.0",
+    "x": 234
+   },
+   {
+    "str": "3.0 A-",
+    "x": 264
+   },
+   {
+    "str": "11.1",
+    "x": 312
+   }
+  ],
+  "text": "CS 100W Technical Writing 3.0 3.0 3.0 A- 11.1"
+ },
+ {
+  "page": 2,
+  "y": 758,
+  "items": [
+   {
+    "str": "SEMESTER TOTAL:",
+    "x": 36
+   },
+   {
+    "str": "3.0",
+    "x": 192
+   },
+   {
+    "str": "3.0",
+    "x": 222
+   },
+   {
+    "str": "3.0",
+    "x": 252
+   },
+   {
+    "str": "11.1 3.700",
+    "x": 294
+   }
+  ],
+  "text": "SEMESTER TOTAL: 3.0 3.0 3.0 11.1 3.700"
+ },
+ {
+  "page": 2,
+  "y": 744,
+  "items": [
+   {
+    "str": "WINTER SEMESTER 2024 / MAJOR: MS Computer Science",
+    "x": 36
+   }
+  ],
+  "text": "WINTER SEMESTER 2024 / MAJOR: MS Computer Science"
+ },
+ {
+  "page": 2,
+  "y": 730,
+  "items": [
+   {
+    "str": "CS 200 Thesis Seminar",
+    "x": 36
+   },
+   {
+    "str": "3.0",
+    "x": 180
+   },
+   {
+    "str": "3.0",
+    "x": 210
+   },
+   {
+    "str": "0.0",
+    "x": 240
+   }
+  ],
+  "text": "CS 200 Thesis Seminar 3.0 3.0 0.0"
+ },
+ {
+  "page": 2,
+  "y": 716,
+  "items": [
+   {
+    "str": "CUMULATIVE TOTAL:",
+    "x": 36
+   },
+   {
+    "str": "12.0",
+    "x": 186
+   },
+   {
+    "str": "9.0",
+    "x": 222
+   },
+   {
+    "str": "12.0",
+    "x": 252
+   },
+   {
+    "str": "33.0 3.667",
+    "x": 300
+   }
+  ],
+  "text": "CUMULATIVE TOTAL: 12.0 9.0 12.0 33.0 3.667"
+ }
+]

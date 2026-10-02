@@ -8,11 +8,13 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:parsers": "node --test \"src/degreeProgress/**/*.test.ts\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.0",
     "lucide-react": "^0.563.0",
+    "pdfjs-dist": "^6.3.289",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
