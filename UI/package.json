@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:parsers": "node --test \"src/degreeProgress/**/*.test.ts\""
+    "test:parsers": "node --test \"src/degreeProgress/**/*.test.ts\" \"src/config/*.test.ts\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.0",
