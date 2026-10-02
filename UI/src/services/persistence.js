@@ -51,6 +51,7 @@ const ACCOUNT_CAPABILITIES = {
   profile: true,
   memory: true,
   internAlerts: true,
+  registrationInfo: true,
 };
 
 const GUEST_CAPABILITIES = {
@@ -59,6 +60,7 @@ const GUEST_CAPABILITIES = {
   profile: false,
   memory: false,
   internAlerts: false,
+  registrationInfo: true,
 };
 
 // ── Supabase-backed ───────────────────────────────────────────────────────────

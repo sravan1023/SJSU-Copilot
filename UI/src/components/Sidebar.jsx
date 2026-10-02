@@ -21,6 +21,7 @@ export default function Sidebar({
   setIsDarkMode,
   onProfileClick,
   onInternAlertsClick,
+  onRegistrationClick,
   onLogout,
   user,
   currentPage,
@@ -106,7 +107,14 @@ export default function Sidebar({
         <h3 className="text-[11px] font-semibold text-sidebar-text-muted px-2 mb-2 uppercase tracking-wider">Services</h3>
         <div className="space-y-1">
           <SidebarToolItem icon={<GraduationCap size={16} />} label="Degree Progress" />
-          <SidebarToolItem icon={<Calendar size={16} />} label="Registration Info" />
+          {capabilities.registrationInfo && (
+            <SidebarToolItem
+              icon={<Calendar size={16} />}
+              label="Registration Info"
+              active={currentPage === 'registration'}
+              onClick={onRegistrationClick}
+            />
+          )}
           {capabilities.internAlerts && (
             <SidebarToolItem
               icon={<Bell size={16} />}

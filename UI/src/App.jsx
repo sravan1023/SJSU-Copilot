@@ -4,6 +4,7 @@ import MainChat from './components/MainChat';
 import RightPanel from './components/RightPanel';
 import UserProfile from './components/UserProfile';
 import InternJobsAlertsPage from './internAlerts/InternJobsAlertsPage.tsx';
+import RegistrationInfoPage from './registration/RegistrationInfoPage.tsx';
 import Login from './components/Login';
 import Signup from './components/Signup';
 import VerifyEmail from './components/VerifyEmail';
@@ -1141,6 +1142,7 @@ export default function App() {
         setIsDarkMode={setIsDarkMode}
         onProfileClick={() => setCurrentPage('profile')}
         onInternAlertsClick={() => setCurrentPage('intern-alerts')}
+        onRegistrationClick={() => setCurrentPage('registration')}
         onLogout={handleLogout}
         user={user}
         capabilities={can}
@@ -1181,6 +1183,8 @@ export default function App() {
         />
       ) : currentPage === 'intern-alerts' && can.internAlerts ? (
         <InternJobsAlertsPage onBack={() => setCurrentPage('chat')} />
+      ) : currentPage === 'registration' && can.registrationInfo ? (
+        <RegistrationInfoPage onBack={() => setCurrentPage('chat')} />
       ) : (
         <>
           <MainChat
