@@ -14,6 +14,7 @@ import audiences
 import ratelimit
 from auth import Principal
 from ratelimit import rate_limited
+from services import structured_answers
 from services.llm import stream_chat, generate_title
 from services.web_search import build_rag_prompt
 from services.conversation_state import (
@@ -30,6 +31,11 @@ router = APIRouter(tags=["chat"])
 # How often to emit an SSE comment while retrieval is running, so proxies and
 # load balancers don't treat a slow search as an idle connection.
 KEEPALIVE_SECONDS = 10
+
+# Routers read prepared data, not the network, so they get far less than
+# retrieval does. A router that cannot answer in a second is skipped: the turn
+# is better served by search than by waiting.
+STRUCTURED_TIMEOUT_SECONDS = 1.0
 
 # Request bounds. These endpoints were previously unbounded: an unauthenticated
 # caller could post an arbitrarily large body and burn provider tokens. The
@@ -104,6 +110,67 @@ _REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 def _request_id(request: Request) -> str:
     supplied = request.headers.get("x-request-id") or ""
     return supplied if _REQUEST_ID_RE.fullmatch(supplied) else uuid.uuid4().hex
+
+
+async def _structured_answer(
+    messages: list[dict], audience: str, principal_kind: str, request_id: str
+) -> structured_answers.Answer | None:
+    """Ask the structured-answer routers, never failing the turn.
+
+    Any exception, a timeout included, degrades to None, which is today's
+    behaviour. CancelledError is a BaseException and so still propagates when
+    the client goes away.
+    """
+    answer = None
+    with observability.stage("structured.route"):
+        try:
+            answer = await asyncio.wait_for(
+                structured_answers.answer(messages, audience, principal_kind),
+                STRUCTURED_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            observability.record(
+                "structured_fallthrough",
+                "timeout" if isinstance(exc, TimeoutError) else "error",
+            )
+            logger.warning(
+                "structured answer failed, falling through to retrieval",
+                extra={"request_id": request_id, "error_type": type(exc).__name__},
+            )
+    if answer is not None and answer.mode not in structured_answers.MODES:
+        logger.warning(
+            "structured answer has an unknown mode, ignored",
+            extra={"request_id": request_id},
+        )
+        return None
+    if answer is not None:
+        observability.record("answer_route", answer.route or "unnamed")
+        observability.record("answer_mode", answer.mode)
+    return answer
+
+
+def _prepend_to_full_text(frame: str, prefix: str, answer) -> str:
+    """Make the done and replace frames carry the prefix the client already saw.
+
+    A `replace` frame swaps the client's whole rendered text for the model's
+    repaired answer, and `done.full_response` is what gets persisted. Both are
+    built by stream_chat from the model output alone, so without this the
+    prefix would vanish on a repair and be missing from the saved message.
+    """
+    if not (frame.startswith('data: {"done"') or frame.startswith('data: {"replace"')):
+        return frame
+    try:
+        payload = json.loads(frame[len("data: "):])
+    except json.JSONDecodeError:
+        return frame
+    if "replace" in payload:
+        payload["replace"] = prefix + payload["replace"]
+    else:
+        payload["full_response"] = prefix + payload.get("full_response", "")
+        payload["answer_mode"] = "prefix"
+        if answer.card is not None:
+            payload["card"] = answer.card
+    return _sse(payload)
 
 
 async def _retrieve_with_keepalive(
@@ -190,17 +257,52 @@ async def chat(
                 # 4. Adapt to conversation context
                 behavior = adapt_behavior(behavior, state)
 
+            structured = await _structured_answer(
+                messages, audience, principal.kind, request_id
+            )
+
+            if structured is not None and structured.mode == "card":
+                # Zero provider tokens: the card is the whole answer, so
+                # stream_chat is never reached and no Groq request is made.
+                yield _sse({"token": structured.markdown})
+                done = {
+                    "done": True,
+                    "full_response": structured.markdown,
+                    "validators_run": [],
+                    "validators_passed": True,
+                    "repairs_applied": [],
+                    "answer_mode": "structured",
+                    "card": structured.card,
+                    "request_id": request_id,
+                }
+                if structured.sources:
+                    done["sources"] = structured.sources
+                yield _sse(done)
+                return
+
             yield _sse({"status": "searching"})
 
+            prefix_text = ""
+            if structured is not None and structured.mode == "prefix":
+                # Verbatim, then a separator frame, so the emitted markdown
+                # stays byte-equal to its source and the model's answer starts
+                # on its own paragraph.
+                prefix_text = structured.markdown + "\n\n"
+                yield _sse({"token": structured.markdown})
+                yield _sse({"token": "\n\n"})
+
             rag_prompt, sources = None, []
-            with observability.stage("rag.total"):
-                async for item in _retrieve_with_keepalive(
-                    messages, request_id, audience, principal.kind
-                ):
-                    if isinstance(item, tuple):
-                        rag_prompt, sources = item[1]
-                    else:
-                        yield item
+            if structured is not None and structured.mode == "context":
+                rag_prompt, sources = structured.rag_prompt, structured.sources
+            else:
+                with observability.stage("rag.total"):
+                    async for item in _retrieve_with_keepalive(
+                        messages, request_id, audience, principal.kind
+                    ):
+                        if isinstance(item, tuple):
+                            rag_prompt, sources = item[1]
+                        else:
+                            yield item
 
             # Retrieval can take seconds; don't pay for generation if the user
             # already navigated away or hit stop.
@@ -227,6 +329,8 @@ async def chat(
             ):
                 if frame.startswith('data: {"error"'):
                     outcome = "upstream_error"
+                if prefix_text:
+                    frame = _prepend_to_full_text(frame, prefix_text, structured)
                 yield frame
 
         except asyncio.CancelledError:
