@@ -80,8 +80,15 @@ function Notice({ tone, children }: { tone: 'info' | 'error'; children: ReactNod
   );
 }
 
-function EventRow({ ev, next }: { ev: DeadlineEvent; next: boolean }) {
+/** Today's date in Pacific time as YYYY-MM-DD (en-CA formats that way). */
+function pacificToday(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+}
+
+function EventRow({ ev, next, today }: { ev: DeadlineEvent; next: boolean; today: string }) {
   const dates = fmtRange(ev.start_date, ev.end_date);
+  const inProgress =
+    !ev.passed && !!ev.start_date && !!ev.end_date && ev.start_date < today && today <= ev.end_date;
   return (
     <li
       className={`rounded-md border p-3 ${
@@ -91,6 +98,11 @@ function EventRow({ ev, next }: { ev: DeadlineEvent; next: boolean }) {
       <div className="flex flex-wrap items-center gap-2">
         {next && (
           <span className="rounded bg-sjsu-gold px-1.5 py-0.5 text-[11px] font-semibold text-black">Next up</span>
+        )}
+        {inProgress && (
+          <span className="rounded border border-sjsu-gold px-1.5 py-0.5 text-[11px] font-semibold text-text-primary">
+            In progress
+          </span>
         )}
         <span className="rounded border border-border-color px-1.5 py-0.5 text-[11px] text-text-secondary">
           {CATEGORY_TAG[ev.category]}
@@ -155,7 +167,10 @@ function DeadlinesTab() {
   }, [data, filter]);
   const upcoming = events.filter((e) => !e.passed);
   const passed = events.filter((e) => e.passed);
-  const nextEvent = upcoming.find((e) => e.start_date) ?? null;
+  // The server's Pacific date when the term list loaded, else the viewer's
+  // Pacific date. Compared as YYYY-MM-DD strings, which sort correctly.
+  const today = terms?.today ?? pacificToday();
+  const nextEvent = upcoming.find((e) => e.start_date && e.start_date >= today) ?? null;
 
   const currentTerm = selected ?? data?.term ?? '';
   // The API lists loaded terms only. Include this/next even before their
@@ -284,7 +299,7 @@ function DeadlinesTab() {
           {upcoming.length > 0 && (
             <ul className="space-y-2">
               {upcoming.map((ev, i) => (
-                <EventRow key={`${ev.label_raw}-${i}`} ev={ev} next={ev === nextEvent} />
+                <EventRow key={`${ev.label_raw}-${i}`} ev={ev} next={ev === nextEvent} today={today} />
               ))}
             </ul>
           )}
@@ -301,13 +316,11 @@ function DeadlinesTab() {
                 {showPassed ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
                 Earlier this term ({passed.length})
               </button>
-              {showPassed && (
-                <ul id="reg-passed-events" className="mt-2 space-y-2">
-                  {passed.map((ev, i) => (
-                    <EventRow key={`${ev.label_raw}-${i}`} ev={ev} next={false} />
-                  ))}
-                </ul>
-              )}
+              <ul id="reg-passed-events" hidden={!showPassed} className="mt-2 space-y-2">
+                {passed.map((ev, i) => (
+                  <EventRow key={`${ev.label_raw}-${i}`} ev={ev} next={false} today={today} />
+                ))}
+              </ul>
             </div>
           )}
         </>
