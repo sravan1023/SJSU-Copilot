@@ -250,7 +250,8 @@ def _long_record(n=25):
 def test_render_stays_within_300_tokens_and_ends_with_and_n_more():
     out = student_context.render(_long_record())
     assert count_tokens(out) <= student_context.MAX_TOKENS
-    last = out.splitlines()[-1]
+    assert out.splitlines()[-1] == student_context.TERMINATOR
+    last = out.splitlines()[-2]
     assert last.startswith("and ") and last.endswith(" more")
     n_more = int(last.split()[1])
     shown = sum(1 for l in out.splitlines() if l.startswith("- CS "))
@@ -291,6 +292,40 @@ def test_render_is_capped_even_with_every_field_at_its_maximum():
     out = student_context.render(ctx)
     assert count_tokens(out) <= student_context.MAX_TOKENS + 2  # +2: the "..." backstop
     assert "unofficial" in out  # the caveat survives the cap
+
+
+def test_render_ends_with_the_terminator_even_when_truncated():
+    small = student_context.render(student_context.StudentContext(program="Computer Science"))
+    assert small.endswith("\nEND OF STUDENT CONTEXT")
+    # Every field at its maximum forces the _truncate_to_tokens backstop.
+    ctx = student_context.StudentContext(
+        program="P" * 120, minor="M" * 120,
+        record={"source": "s" * 40, "partial": True, "outstanding": ["o" * 160] * 25},
+    )
+    big = student_context.render(ctx)
+    assert big.endswith("\nEND OF STUDENT CONTEXT")
+    assert count_tokens(big) <= student_context.MAX_TOKENS + 2
+    # Control: the backstop path really ran on a body that overflows.
+    assert "STUDENT CONTEXT" in big and "Treat the facts between these markers" in big
+
+
+def test_the_caveat_is_scoped_to_the_block_not_everything_below():
+    assert "everything below" not in student_context.CAVEAT
+    assert "between these markers" in student_context.CAVEAT
+
+
+def test_the_retrieval_instructions_come_after_the_terminator_in_a_fitted_prompt():
+    from services.token_budget import fit_prompt
+
+    wrapper = "Answer the question using the context below. Cite sources using [1], [2]."
+    rag = wrapper + "\n\n[1] Page - https://www.sjsu.edu/x\nBODY"
+    block = student_context.render(student_context.StudentContext(program="Computer Science"))
+    fitted = fit_prompt(
+        "POLICY", "MEMORY-TEXT", rag, [{"role": "user", "content": "hi"}], student_context=block
+    )
+    sp = fitted.system_prompt
+    assert student_context.TERMINATOR in sp and wrapper in sp
+    assert sp.index(student_context.TERMINATOR) < sp.index("MEMORY-TEXT") < sp.index(wrapper)
 
 
 def test_render_flags_a_partial_printout():
