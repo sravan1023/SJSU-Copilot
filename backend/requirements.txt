@@ -13,3 +13,12 @@ pypdf>=5.1.0
 # [crypto] pulls `cryptography`, needed for the ES256 keys Supabase signs with.
 PyJWT[crypto]>=2.10.0
 
+# The campus calendar and schedule parsers (backend/campus/) call lxml.html
+# directly: on the 3.76 MB schedule page it parses in ~4 s against ~18 s for
+# BeautifulSoup + html.parser (SERVICES_BUILD_PLAN F1).
+lxml>=5.0.0
+
+# IANA timezone database for zoneinfo: Windows ships none, and registration
+# deadlines are dated in America/Los_Angeles (campus/registration/refresh.py,
+# services/registration.py).
+tzdata

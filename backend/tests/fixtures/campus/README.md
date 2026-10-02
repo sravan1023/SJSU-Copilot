@@ -8,6 +8,7 @@ as of that date; none sent an ETag or Last-Modified header.
 |---|---|---|
 | `schedule-fall-2026.trimmed.html` | https://www.sjsu.edu/classes/schedules/fall-2026.php | Real `<head>`, header and footer. The full page is 3.76 MB and 6,980 rows; this keeps 300 rows chosen to cover every Satisfies spelling, every mode and type, TBA times, multi-meeting (`<br>`) cells, a 0-seat section, Notes text, and the literal duplicate `PHYS 50 (Section 25)` row. |
 | `registrar-calendar-fall-2026.html` | https://www.sjsu.edu/registrar/calendar/fall-2026.php | whole |
+| `registrar-calendar-spring-2027.html` | https://www.sjsu.edu/registrar/calendar/spring-2027.php | whole; fetched later on 2026-10-01 during the first live dry run. A different layout from fall: one table with no `<th>` row, year marker rows (`2026` / `2027`), lowercase labels. |
 | `academic-calendar-2026-2027.html` | https://www.sjsu.edu/classes/calendar/2026-2027.php | whole |
 | `final-exam-schedule-fall-2026.html` | https://www.sjsu.edu/classes/final-exam-schedule/fall-2026.php | whole |
 | `bursar-payment-due-dates-fall.html` | https://www.sjsu.edu/bursar/fees-due-dates/payment-due-dates/fall.php | whole |

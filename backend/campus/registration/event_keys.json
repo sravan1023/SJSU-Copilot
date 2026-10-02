@@ -1,0 +1,607 @@
+{
+ "_doc": "Shared event vocabulary. label_patterns (for R1) match registrar/academic calendar Event Description text, case-insensitive. question_patterns (R6) match a lowercased user question. supersedes: when this key matches, the listed keys are dropped because their pattern is a sub-phrase of this one's. groups: generic phrasings that name no single event; they yield a context route over their keys only when no specific key matched.",
+ "keys": {
+  "enrollment_appointments_continuing": {
+   "label": "Enrollment appointments viewable (continuing students)",
+   "intent": "deadline",
+   "label_patterns": [
+    "Enrollment Appointments Viewable on MySJSU for Continuing"
+   ],
+   "question_patterns": [
+    "(enrollment|registration) appointments?.{0,40}continuing",
+    "continuing.{0,40}(enrollment|registration) appointments?"
+   ]
+  },
+  "enrollment_appointments_new_grad": {
+   "label": "Enrollment appointments viewable (new graduate students)",
+   "intent": "deadline",
+   "label_patterns": [
+    "Enrollment Appointments Viewable on MySJSU for New Graduate"
+   ],
+   "question_patterns": [
+    "(enrollment|registration) appointments?.{0,40}new grad",
+    "new grad\\w*.{0,40}(enrollment|registration) appointments?"
+   ]
+  },
+  "registration_period_continuing": {
+   "label": "Registration period for continuing students",
+   "intent": "deadline",
+   "label_patterns": [
+    "Registration Period for Continuing Students"
+   ],
+   "question_patterns": [
+    "registration (period|dates?).{0,40}continuing",
+    "continuing.{0,40}registration (period|dates?)"
+   ]
+  },
+  "registration_period_new_grad": {
+   "label": "Registration period for new graduate students",
+   "intent": "deadline",
+   "label_patterns": [
+    "Registration Period for New Graduate Students"
+   ],
+   "question_patterns": [
+    "registration (period|dates?).{0,40}new grad",
+    "new grad\\w*.{0,40}registration (period|dates?)"
+   ]
+  },
+  "waitlist_start": {
+   "label": "Waitlist starts",
+   "intent": "deadline",
+   "label_patterns": [
+    "Waitlist Starts"
+   ],
+   "question_patterns": [
+    "waitlist (starts?|begins?|opens?)\\b",
+    "when does (the )?waitlist (start|begin|open)"
+   ]
+  },
+  "variable_waitlist_begins": {
+   "label": "Variable waitlist process and automated reprioritization begins",
+   "intent": "deadline",
+   "label_patterns": [
+    "Variable waitlist process",
+    "Waitlist Reprioritization"
+   ],
+   "question_patterns": [
+    "variable waitlist",
+    "waitlist reprioriti[sz]ation"
+   ]
+  },
+  "enrollment_limit_increase": {
+   "label": "Enrollment limit increased to 19 units",
+   "intent": "deadline",
+   "label_patterns": [
+    "Enrollment Limit increased to 19 units"
+   ],
+   "question_patterns": [
+    "enrollment (unit )?limit\\b",
+    "unit limit (increase|goes up|raised)"
+   ]
+  },
+  "excess_units_processing_begins": {
+   "label": "Begin processing excess units petitions",
+   "intent": "deadline",
+   "label_patterns": [
+    "Begin Processing Excess Units Petitions"
+   ],
+   "question_patterns": [
+    "process\\w*.{0,25}excess units? petitions?",
+    "excess units? petitions?.{0,25}process\\w*"
+   ],
+   "supersedes": [
+    "excess_units_petition_last"
+   ]
+  },
+  "first_time_repeaters_enroll": {
+   "label": "First-time repeaters may enroll",
+   "intent": "deadline",
+   "label_patterns": [
+    "First time repeaters may enroll"
+   ],
+   "question_patterns": [
+    "first[- ]time repeaters?",
+    "repeat exception petitions?.{0,30}(begin|start)"
+   ]
+  },
+  "drop_full_refund_last": {
+   "label": "Last day to drop for 100% refund",
+   "intent": "deadline",
+   "label_patterns": [
+    "Last Day to Drop for 100% Refund"
+   ],
+   "question_patterns": [
+    "drop.{0,40}refund",
+    "refund.{0,40}drop",
+    "100\\s?%\\s*refund"
+   ]
+  },
+  "instruction_first_day": {
+   "label": "First day of instruction",
+   "intent": "term_dates",
+   "label_patterns": [
+    "First Day of Instruction"
+   ],
+   "question_patterns": [
+    "first day of (instruction|classes|class|school|the semester|the term)",
+    "when (do|does) (classes|school|the semester|the term|instruction) (start|begin)",
+    "(classes|semester|instruction) start date"
+   ]
+  },
+  "waitlist_end": {
+   "label": "Waitlist ends",
+   "intent": "deadline",
+   "label_patterns": [
+    "Waitlist ends"
+   ],
+   "question_patterns": [
+    "waitlist (ends?|closes?|ending|cut-?off)\\b",
+    "end of (the )?waitlist",
+    "last day (of|for|on) (the )?waitlist"
+   ]
+  },
+  "permission_number_required": {
+   "label": "Permission number required to add for all classes",
+   "intent": "deadline",
+   "label_patterns": [
+    "Permission number required to add"
+   ],
+   "question_patterns": [
+    "permission (numbers?|codes?)\\b"
+   ]
+  },
+  "holiday_labor_day": {
+   "label": "Labor Day (campus closed)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Labor Day"
+   ],
+   "question_patterns": [
+    "\\blabor day\\b"
+   ]
+  },
+  "drop_without_w_last": {
+   "label": "Last day to drop classes without a W grade",
+   "intent": "deadline",
+   "label_patterns": [
+    "Last Day to Drop Classes without a .{0,3}W.{0,3} Grade"
+   ],
+   "question_patterns": [
+    "without an? [\\\"'“”]?w[\\\"'“”]?\\b",
+    "\\bno [\\\"'“”]?w[\\\"'“”]? (grade|on my)",
+    "avoid(ing)? an? [\\\"'“”]?w[\\\"'“”]?\\b",
+    "drop.{0,30}\\bw grade\\b"
+   ]
+  },
+  "add_drop_last": {
+   "label": "Last day to add/drop classes via MySJSU",
+   "intent": "deadline",
+   "label_patterns": [
+    "Last Day to Add/Drop Classes via MySJSU"
+   ],
+   "question_patterns": [
+    "\\badd\\s*(/|-| and | or )\\s*drop\\b",
+    "\\badd[- ]drop\\b",
+    "(last day|deadline) to add\\b"
+   ]
+  },
+  "audit_crcr_last": {
+   "label": "Last day to submit audit or credit/no-credit request",
+   "intent": "deadline",
+   "label_patterns": [
+    "Audit or Credit/No-Credit Option Request"
+   ],
+   "question_patterns": [
+    "credit\\s*/?\\s*no[- ]?credit",
+    "\\bcr\\s*/?\\s*nc\\b",
+    "(?<!degree )(?<!dars )\\baudit (option|request|a class|a course)\\b"
+   ]
+  },
+  "excess_units_petition_last": {
+   "label": "Last day to file excess units petition",
+   "intent": "deadline",
+   "label_patterns": [
+    "Last Day to file Excess Units Petition"
+   ],
+   "question_patterns": [
+    "excess units? petitions?"
+   ]
+  },
+  "instructor_drops_last": {
+   "label": "Last day to submit instructor drops",
+   "intent": "deadline",
+   "label_patterns": [
+    "Last Day to submit Instructor Drops"
+   ],
+   "question_patterns": [
+    "instructor drops?\\b"
+   ]
+  },
+  "census_date": {
+   "label": "Enrollment census date",
+   "intent": "deadline",
+   "label_patterns": [
+    "Enrollment Census Date"
+   ],
+   "question_patterns": [
+    "\\bcensus\\b"
+   ]
+  },
+  "late_add_post_census_begins": {
+   "label": "Late add post-census request requirement begins",
+   "intent": "deadline",
+   "label_patterns": [
+    "Late Add Post Census Request Requirement begins"
+   ],
+   "question_patterns": [
+    "late add post[- ]census",
+    "post[- ]census (late )?add\\b",
+    "late add (request|requirement)"
+   ],
+   "supersedes": [
+    "census_date"
+   ]
+  },
+  "late_drop_petition_begins": {
+   "label": "Late drop / semester withdrawal petition requirement begins",
+   "intent": "deadline",
+   "label_patterns": [
+    "Late Drop/ Semester Withdrawal Petition Requirement begins"
+   ],
+   "question_patterns": [
+    "late drop.{0,40}requirement (begins?|starts?)",
+    "semester withdrawal.{0,40}requirement (begins?|starts?)"
+   ],
+   "supersedes": [
+    "late_drop_petition_last"
+   ]
+  },
+  "graduation_application_priority_deadline": {
+   "label": "Graduation application deadline for priority registration",
+   "intent": "deadline",
+   "label_patterns": [
+    "Graduation Application Deadline to Qualify for Priority Registration"
+   ],
+   "question_patterns": [
+    "graduation application.{0,60}priority",
+    "priority registration.{0,60}graduation application",
+    "graduat\\w+.{0,30}priority registration"
+   ]
+  },
+  "holiday_veterans_day": {
+   "label": "Veterans Day (campus closed)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Veteran\\W?s Day"
+   ],
+   "question_patterns": [
+    "\\bveterans?'?s? day\\b"
+   ]
+  },
+  "late_drop_petition_last": {
+   "label": "Last day to file late drop / semester withdrawal petition",
+   "intent": "deadline",
+   "label_patterns": [
+    "Last Day to File Late Drop/ Semester Withdrawal Petition"
+   ],
+   "question_patterns": [
+    "late drop.{0,30}petition",
+    "semester withdrawal petition",
+    "petition.{0,20}late drop"
+   ]
+  },
+  "late_enrollment_post_census_last": {
+   "label": "Last day to file late enrollment post census",
+   "intent": "deadline",
+   "label_patterns": [
+    "Last Day to File Late Enrollment Post Census"
+   ],
+   "question_patterns": [
+    "late enrollment.{0,15}post[- ]census",
+    "post[- ]census (late )?enrollment"
+   ],
+   "supersedes": [
+    "census_date"
+   ]
+  },
+  "holiday_thanksgiving": {
+   "label": "Thanksgiving holidays (campus closed)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Thanksgiving Holiday"
+   ],
+   "question_patterns": [
+    "\\bthanksgiving\\b"
+   ]
+  },
+  "instruction_last_day": {
+   "label": "Last day of instruction",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Last Day of Instruction"
+   ],
+   "question_patterns": [
+    "last day of (instruction|classes|class|school|the semester|the term)",
+    "when (do|does) (classes|school|the semester|the term|instruction) end",
+    "(classes|semester|instruction) end date"
+   ]
+  },
+  "grade_posting_opens": {
+   "label": "Faculty web access for grade posting opens",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Faculty Web Access for Grade Posting"
+   ],
+   "question_patterns": [
+    "faculty web access",
+    "grade posting (opens?|begins?)"
+   ]
+  },
+  "finals_period": {
+   "label": "Culminating activities and final examination period",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Culminating Activities",
+    "Final Examination Period"
+   ],
+   "question_patterns": [
+    "\\bfinals? (week|period|dates?)\\b",
+    "final exam(ination)?s? (week|period|dates?)\\b",
+    "culminating activities",
+    "when (are|is) (the )?finals\\b",
+    "when does finals? (start|begin|end)"
+   ]
+  },
+  "commencement": {
+   "label": "Commencement",
+   "intent": "term_dates",
+   "label_patterns": [
+    "^Commencement"
+   ],
+   "question_patterns": [
+    "\\bcommencement\\b",
+    "graduation ceremony"
+   ]
+  },
+  "grades_due": {
+   "label": "Grades due from faculty",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Grades Due from Faculty"
+   ],
+   "question_patterns": [
+    "\\bgrades? (are |is )?due\\b",
+    "when (do|must|should) (faculty|professors?|instructors?) (submit|post|turn in) grades"
+   ]
+  },
+  "grades_viewable": {
+   "label": "Grades viewable on MySJSU",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Grades Viewable on MySJSU"
+   ],
+   "question_patterns": [
+    "\\bgrades? (are |is )?(viewable|posted|available|released)\\b",
+    "when (can|will|do) (i|we|students) (see|view|get|check) (my |our |the )?(final )?grades"
+   ]
+  },
+  "winter_recess": {
+   "label": "Winter recess / winter break",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Winter Recess",
+    "Winter Break"
+   ],
+   "question_patterns": [
+    "winter (recess|break)\\b"
+   ]
+  },
+  "holiday_christmas": {
+   "label": "Christmas (campus closed)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Christmas Holiday"
+   ],
+   "question_patterns": [
+    "\\bchristmas\\b"
+   ]
+  },
+  "final_grade_submission_deadline": {
+   "label": "Final deadline for grade submission",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Final Deadline for Grade Submission"
+   ],
+   "question_patterns": [
+    "final (deadline|day) (for|to) (submit\\w*|post\\w*)?\\s*(grade|grades)",
+    "grade submission deadline"
+   ]
+  },
+  "grades_finalized": {
+   "label": "Grades finalized; academic standing posted",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Grades Finalized"
+   ],
+   "question_patterns": [
+    "grades? (are )?finali[sz]ed",
+    "academic standing (posted|post|is posted)"
+   ]
+  },
+  "holiday_memorial_day": {
+   "label": "Memorial Day (campus closed)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Memorial Day"
+   ],
+   "question_patterns": [
+    "\\bmemorial day\\b"
+   ]
+  },
+  "holiday_independence_day": {
+   "label": "Independence Day (campus closed)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Independence Day"
+   ],
+   "question_patterns": [
+    "\\bindependence day\\b",
+    "\\bfourth of july\\b",
+    "\\bjuly 4(th)?\\b"
+   ]
+  },
+  "make_up_day": {
+   "label": "Make-up day (finals)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Make-Up Day"
+   ],
+   "question_patterns": [
+    "make-?up day\\b"
+   ]
+  },
+  "non_instructional_day": {
+   "label": "Non-instructional day (no classes)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Non-Instructional Day"
+   ],
+   "question_patterns": [
+    "non-?instructional day"
+   ]
+  },
+  "study_day": {
+   "label": "Study/conference day (no classes or exams)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Study/Conf\\. Day"
+   ],
+   "question_patterns": [
+    "\\bstudy day\\b",
+    "study/conf"
+   ]
+  },
+  "holiday_new_years_day": {
+   "label": "New Year's Day (campus closed)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "New Year.?s Day"
+   ],
+   "question_patterns": [
+    "new year'?s? day"
+   ]
+  },
+  "holiday_mlk_day": {
+   "label": "Dr. Martin Luther King, Jr. Day (campus closed)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Martin Luther King"
+   ],
+   "question_patterns": [
+    "\\bmlk\\b",
+    "martin luther king"
+   ]
+  },
+  "holiday_farmworkers_day": {
+   "label": "Farmworkers Day (campus closed)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Farmworkers Day"
+   ],
+   "question_patterns": [
+    "farmworkers? day",
+    "c[eé]sar chavez"
+   ]
+  },
+  "spring_recess": {
+   "label": "Spring recess (no classes)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Spring Recess"
+   ],
+   "question_patterns": [
+    "spring (recess|break)\\b"
+   ]
+  },
+  "holiday_juneteenth": {
+   "label": "Juneteenth (campus closed)",
+   "intent": "term_dates",
+   "label_patterns": [
+    "Juneteenth"
+   ],
+   "question_patterns": [
+    "\\bjuneteenth\\b"
+   ]
+  }
+ },
+ "groups": {
+  "drop_deadlines": {
+   "keys": [
+    "drop_without_w_last",
+    "add_drop_last",
+    "drop_full_refund_last",
+    "late_drop_petition_last"
+   ],
+   "question_patterns": [
+    "\\bdrop (deadlines?|dates?)\\b",
+    "(last day|deadlines?|dates?) (to|for) drop(ping)?\\b",
+    "\\bwithdraw(al|ing)? deadlines?\\b"
+   ]
+  },
+  "registration_periods": {
+   "keys": [
+    "registration_period_continuing",
+    "registration_period_new_grad"
+   ],
+   "question_patterns": [
+    "registration (period|dates?|deadlines?)\\b",
+    "when (does|do) registration (start|open|begin|end)",
+    "\\benrollment (period|dates?)\\b"
+   ]
+  },
+  "enrollment_appointments": {
+   "keys": [
+    "enrollment_appointments_continuing",
+    "enrollment_appointments_new_grad"
+   ],
+   "question_patterns": [
+    "(enrollment|registration) appointments?\\b",
+    "appointment times?\\b"
+   ]
+  },
+  "waitlist_dates": {
+   "keys": [
+    "waitlist_start",
+    "waitlist_end"
+   ],
+   "question_patterns": [
+    "waitlist (dates?|deadlines?)\\b"
+   ]
+  },
+  "holidays": {
+   "keys": [
+    "holiday_labor_day",
+    "holiday_veterans_day",
+    "holiday_thanksgiving",
+    "holiday_christmas",
+    "holiday_memorial_day",
+    "holiday_independence_day",
+    "holiday_new_years_day",
+    "holiday_mlk_day",
+    "holiday_farmworkers_day",
+    "holiday_juneteenth",
+    "winter_recess",
+    "spring_recess",
+    "non_instructional_day",
+    "study_day"
+   ],
+   "question_patterns": [
+    "\\bholidays?\\b",
+    "campus (closures?|closed)",
+    "\\bdays? off\\b",
+    "\\bno classes\\b",
+    "school closed"
+   ]
+  }
+ }
+}
