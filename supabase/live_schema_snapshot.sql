@@ -658,6 +658,55 @@ CREATE TABLE IF NOT EXISTS "public"."behavior_settings" (
 ALTER TABLE "public"."behavior_settings" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."campus_current" (
+    "source_key" "text" NOT NULL,
+    "scope_key" "text" NOT NULL,
+    "snapshot_id" "uuid" NOT NULL,
+    "verified_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."campus_current" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."campus_refresh_runs" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "started_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "finished_at" timestamp with time zone,
+    "outcome" "text" DEFAULT 'running'::"text" NOT NULL,
+    "stats" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "error" "text",
+    CONSTRAINT "campus_refresh_runs_outcome_check" CHECK (("outcome" = ANY (ARRAY['running'::"text", 'success'::"text", 'partial'::"text", 'failed'::"text"])))
+);
+
+
+ALTER TABLE "public"."campus_refresh_runs" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."campus_snapshots" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "source_key" "text" NOT NULL,
+    "scope_key" "text" NOT NULL,
+    "source_url" "text" NOT NULL,
+    "fetched_from" "text",
+    "fetched_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "page_last_updated" "date",
+    "content_hash" "text" NOT NULL,
+    "row_count" integer DEFAULT 0 NOT NULL,
+    "header" "jsonb",
+    "checks" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "status" "text" DEFAULT 'staged'::"text" NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "campus_snapshots_row_count_check" CHECK (("row_count" >= 0)),
+    CONSTRAINT "campus_snapshots_scope_key_check" CHECK (("scope_key" ~ '^((spring|summer|fall|winter)-20[0-9]{2}|ay-20[0-9]{2}-20[0-9]{2})$'::"text")),
+    CONSTRAINT "campus_snapshots_source_key_check" CHECK (("source_key" = ANY (ARRAY['schedule'::"text", 'registrar'::"text", 'academic'::"text", 'exams'::"text", 'bursar'::"text"]))),
+    CONSTRAINT "campus_snapshots_status_check" CHECK (("status" = ANY (ARRAY['staged'::"text", 'current'::"text", 'superseded'::"text", 'rejected'::"text"])))
+);
+
+
+ALTER TABLE "public"."campus_snapshots" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."conversation_summaries" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "conversation_id" "uuid" NOT NULL,
@@ -1032,6 +1081,79 @@ CREATE TABLE IF NOT EXISTS "public"."projects" (
 ALTER TABLE "public"."projects" OWNER TO "postgres";
 
 
+CREATE TABLE IF NOT EXISTS "public"."reg_class_sections" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "snapshot_id" "uuid" NOT NULL,
+    "class_number" integer NOT NULL,
+    "course_key" "text" NOT NULL,
+    "section" "text",
+    "mode" "text",
+    "title" "text",
+    "satisfies_raw" "text",
+    "satisfies" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    "units_min" numeric,
+    "units_max" numeric,
+    "type" "text",
+    "days" "text",
+    "start_time" time without time zone,
+    "end_time" time without time zone,
+    "times_raw" "text",
+    "meetings" "jsonb" DEFAULT '[]'::"jsonb" NOT NULL,
+    "meeting_count" smallint DEFAULT 1 NOT NULL,
+    "instructor" "text",
+    "location" "text",
+    "start_date" "date",
+    "end_date" "date",
+    "open_seats" integer,
+    "notes" "text",
+    "raw" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    CONSTRAINT "reg_class_sections_meetings_check" CHECK (
+CASE
+    WHEN ("jsonb_typeof"("meetings") = 'array'::"text") THEN (("jsonb_array_length"("meetings") = 0) OR ("jsonb_array_length"("meetings") = "meeting_count"))
+    ELSE false
+END)
+);
+
+
+ALTER TABLE "public"."reg_class_sections" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."reg_exam_rules" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "snapshot_id" "uuid" NOT NULL,
+    "day_patterns" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    "start_time_from" time without time zone,
+    "start_time_to" time without time zone,
+    "exam_date" "date",
+    "exam_start" time without time zone,
+    "exam_end" time without time zone,
+    "is_exception" boolean DEFAULT false NOT NULL,
+    "course_keys" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
+    "note" "text",
+    "raw" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL
+);
+
+
+ALTER TABLE "public"."reg_exam_rules" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."reg_term_events" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "snapshot_id" "uuid" NOT NULL,
+    "category" "text" NOT NULL,
+    "label_raw" "text" NOT NULL,
+    "date_raw" "text" NOT NULL,
+    "start_date" "date",
+    "end_date" "date",
+    "event_key" "text",
+    CONSTRAINT "reg_term_events_category_check" CHECK (("category" = ANY (ARRAY['registrar'::"text", 'academic'::"text", 'payment'::"text"]))),
+    CONSTRAINT "reg_term_events_date_order_check" CHECK ((("end_date" IS NULL) OR (("start_date" IS NOT NULL) AND ("end_date" >= "start_date"))))
+);
+
+
+ALTER TABLE "public"."reg_term_events" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."saved_conversations" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "user_id" "uuid" NOT NULL,
@@ -1142,6 +1264,31 @@ ALTER TABLE ONLY "public"."behavior_feedback_log"
 
 ALTER TABLE ONLY "public"."behavior_settings"
     ADD CONSTRAINT "behavior_settings_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."campus_current"
+    ADD CONSTRAINT "campus_current_pkey" PRIMARY KEY ("source_key", "scope_key");
+
+
+
+ALTER TABLE ONLY "public"."campus_current"
+    ADD CONSTRAINT "campus_current_snapshot_id_key" UNIQUE ("snapshot_id");
+
+
+
+ALTER TABLE ONLY "public"."campus_refresh_runs"
+    ADD CONSTRAINT "campus_refresh_runs_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."campus_snapshots"
+    ADD CONSTRAINT "campus_snapshots_id_source_scope_key" UNIQUE ("id", "source_key", "scope_key");
+
+
+
+ALTER TABLE ONLY "public"."campus_snapshots"
+    ADD CONSTRAINT "campus_snapshots_pkey" PRIMARY KEY ("id");
 
 
 
@@ -1265,6 +1412,21 @@ ALTER TABLE ONLY "public"."projects"
 
 
 
+ALTER TABLE ONLY "public"."reg_class_sections"
+    ADD CONSTRAINT "reg_class_sections_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."reg_exam_rules"
+    ADD CONSTRAINT "reg_exam_rules_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."reg_term_events"
+    ADD CONSTRAINT "reg_term_events_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."saved_conversations"
     ADD CONSTRAINT "saved_conversations_pkey" PRIMARY KEY ("id");
 
@@ -1319,6 +1481,14 @@ CREATE INDEX "idx_behavior_settings_scope" ON "public"."behavior_settings" USING
 
 
 CREATE INDEX "idx_behavior_settings_user" ON "public"."behavior_settings" USING "btree" ("user_id");
+
+
+
+CREATE INDEX "idx_campus_refresh_runs_started_at" ON "public"."campus_refresh_runs" USING "btree" ("started_at" DESC);
+
+
+
+CREATE INDEX "idx_campus_snapshots_source_scope_created" ON "public"."campus_snapshots" USING "btree" ("source_key", "scope_key", "created_at" DESC);
 
 
 
@@ -1430,6 +1600,22 @@ CREATE INDEX "idx_projects_user" ON "public"."projects" USING "btree" ("user_id"
 
 
 
+CREATE INDEX "idx_reg_class_sections_satisfies" ON "public"."reg_class_sections" USING "gin" ("satisfies");
+
+
+
+CREATE INDEX "idx_reg_class_sections_snapshot_course" ON "public"."reg_class_sections" USING "btree" ("snapshot_id", "course_key", "section");
+
+
+
+CREATE INDEX "idx_reg_exam_rules_snapshot" ON "public"."reg_exam_rules" USING "btree" ("snapshot_id");
+
+
+
+CREATE INDEX "idx_reg_term_events_snapshot_event" ON "public"."reg_term_events" USING "btree" ("snapshot_id", "event_key");
+
+
+
 CREATE INDEX "idx_user_affiliations_user" ON "public"."user_affiliations" USING "btree" ("user_id");
 
 
@@ -1443,6 +1629,10 @@ CREATE UNIQUE INDEX "uq_document_chunks_doc_idx" ON "public"."document_chunks" U
 
 
 CREATE UNIQUE INDEX "uq_documents_url" ON "public"."documents" USING "btree" ("url");
+
+
+
+CREATE UNIQUE INDEX "uq_reg_class_sections_snapshot_class" ON "public"."reg_class_sections" USING "btree" ("snapshot_id", "class_number");
 
 
 
@@ -1538,6 +1728,11 @@ ALTER TABLE ONLY "public"."behavior_settings"
 
 ALTER TABLE ONLY "public"."behavior_settings"
     ADD CONSTRAINT "behavior_settings_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."campus_current"
+    ADD CONSTRAINT "campus_current_snapshot_fkey" FOREIGN KEY ("snapshot_id", "source_key", "scope_key") REFERENCES "public"."campus_snapshots"("id", "source_key", "scope_key") ON DELETE RESTRICT;
 
 
 
@@ -1643,6 +1838,21 @@ ALTER TABLE ONLY "public"."project_summaries"
 
 ALTER TABLE ONLY "public"."projects"
     ADD CONSTRAINT "projects_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."reg_class_sections"
+    ADD CONSTRAINT "reg_class_sections_snapshot_id_fkey" FOREIGN KEY ("snapshot_id") REFERENCES "public"."campus_snapshots"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."reg_exam_rules"
+    ADD CONSTRAINT "reg_exam_rules_snapshot_id_fkey" FOREIGN KEY ("snapshot_id") REFERENCES "public"."campus_snapshots"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."reg_term_events"
+    ADD CONSTRAINT "reg_term_events_snapshot_id_fkey" FOREIGN KEY ("snapshot_id") REFERENCES "public"."campus_snapshots"("id") ON DELETE CASCADE;
 
 
 
@@ -1830,6 +2040,15 @@ ALTER TABLE "public"."behavior_feedback_log" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."behavior_settings" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."campus_current" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."campus_refresh_runs" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."campus_snapshots" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."conversation_summaries" ENABLE ROW LEVEL SECURITY;
 
 
@@ -1925,6 +2144,15 @@ ALTER TABLE "public"."project_summaries" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."projects" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."reg_class_sections" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."reg_exam_rules" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."reg_term_events" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."saved_conversations" ENABLE ROW LEVEL SECURITY;
@@ -2158,6 +2386,18 @@ GRANT ALL ON TABLE "public"."behavior_settings" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."campus_current" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."campus_refresh_runs" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."campus_snapshots" TO "service_role";
+
+
+
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."conversation_summaries" TO "anon";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."conversation_summaries" TO "authenticated";
 GRANT ALL ON TABLE "public"."conversation_summaries" TO "service_role";
@@ -2316,6 +2556,18 @@ GRANT ALL ON TABLE "public"."project_summaries" TO "service_role";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."projects" TO "anon";
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE "public"."projects" TO "authenticated";
 GRANT ALL ON TABLE "public"."projects" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."reg_class_sections" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."reg_exam_rules" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."reg_term_events" TO "service_role";
 
 
 
