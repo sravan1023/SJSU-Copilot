@@ -230,6 +230,94 @@ def test_no_column_level_revoke():
     )
 
 
+# ── 4. New tables start closed ────────────────────────────────────────────────
+
+# 20260930000100 is the first migration written to the rule below. Everything
+# before it predates the rule and is covered by verify_policies.sql instead.
+# Versions compare as strings, which is the order the CLI applies them in
+# (filename order, the same order _files() uses).
+CLOSED_TABLES_SINCE = "20260930000100"
+
+ENABLE_RLS_RE = re.compile(
+    r"alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:public\.)?(\w+)"
+    r"\s+enable\s+row\s+level\s+security",
+    re.IGNORECASE,
+)
+# `revoke all [privileges] on [table] public.a[, public.b] from anon, authenticated;`
+# The table list cannot contain `(`, so `revoke all on function f(...)` never
+# matches.
+REVOKE_ALL_RE = re.compile(
+    r"revoke\s+all(?:\s+privileges)?\s+on\s+(?:table\s+)?([\w.,\s]+?)\s+from\s+([\w,\s]+?)\s*;",
+    re.IGNORECASE,
+)
+
+
+def _unclosed_tables(sql):
+    """[(table, [what is missing])] for every table `sql` creates.
+
+    Each `create table` must be followed, later in the same file, by
+    `enable row level security` on it and by `revoke all` from both anon and
+    authenticated (in one statement or several).
+    """
+    results = []
+    for match in CREATE_TABLE_RE.finditer(sql):
+        table = match.group(1).lower()
+        rest = sql[match.end():]
+
+        has_rls = any(name.lower() == table for name in ENABLE_RLS_RE.findall(rest))
+
+        revoked_from = set()
+        for tables_part, roles_part in REVOKE_ALL_RE.findall(rest):
+            names = {
+                name.strip().lower().removeprefix("public.")
+                for name in tables_part.split(",")
+            }
+            if table in names:
+                revoked_from |= {role.strip().lower() for role in roles_part.split(",")}
+
+        missing = []
+        if not has_rls:
+            missing.append("enable row level security")
+        for role in ("anon", "authenticated"):
+            if role not in revoked_from:
+                missing.append(f"revoke all from {role}")
+        results.append((table, missing))
+    return results
+
+
+def test_new_tables_enable_rls_and_revoke():
+    """A new table is open to the anon key until its migration closes it.
+
+    20260918000100 left default privileges that grant SELECT, INSERT, UPDATE
+    and DELETE on every new public table to anon and authenticated. So a table
+    created without `revoke all ... from anon, authenticated` is reachable over
+    PostgREST with the browser's key, and one without RLS is world-writable.
+
+    Static because the failure is silent: the table works perfectly for the
+    backend, nothing raises, and the migration reports success.
+    """
+    print(f"\n[4.1] every table created after {CLOSED_TABLES_SINCE} enables RLS "
+          "and revokes anon + authenticated")
+    checked = []
+    problems = []
+    for path in _files():
+        if _version(path) <= CLOSED_TABLES_SINCE:
+            continue
+        sql = _strip_comments(path.read_text(encoding="utf-8"))
+        for table, missing in _unclosed_tables(sql):
+            checked.append(table)
+            if missing:
+                problems.append(f"{path.name}: {table} lacks {', '.join(missing)}")
+
+    # An empty `checked` means the create-table regex or the cutoff is wrong,
+    # not that every table passed, so it fails rather than passing vacuously.
+    _check(
+        f"every new table is closed to anon and authenticated ({len(checked)} checked)",
+        bool(checked) and not problems,
+        "; ".join(problems) or f"no create table found after {CLOSED_TABLES_SINCE}",
+    )
+
+
 def run():
     test_versions_are_unique()
     test_versions_are_numeric()
@@ -239,6 +327,7 @@ def run():
     test_on_conflict_user_id_is_gone()
     test_ats_registry_has_rls()
     test_no_column_level_revoke()
+    test_new_tables_enable_rls_and_revoke()
 
     print("\n" + "=" * 60)
     print(f"  Passed: {PASS}")

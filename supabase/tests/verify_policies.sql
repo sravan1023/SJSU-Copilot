@@ -940,3 +940,341 @@ BEGIN
     RAISE NOTICE '  FAIL replaced content is not searchable';
   END IF;
 END $$;
+
+\echo ''
+\echo '=== 23. Campus snapshot tables: service_role only (20261001000100) ==='
+-- Six tables of public SJSU data, none of it for the browser: the UI reads
+-- through /api/registration/* and the backend uses the service key. So every
+-- table gets the same assertions (anon and alice are refused, the service role
+-- is not), plus the two foreign-key behaviours the refresh depends on: pruning
+-- a snapshot takes its rows with it, and the snapshot readers are on cannot be
+-- pruned at all.
+--
+-- Fixture ids: c...01/02 are two schedule snapshots for fall-2026 (01 is what
+-- readers are on, 02 is staged behind it, which is the state just before a
+-- flip). 03 registrar and 04 exams are superseded leftovers. 05 is a bursar
+-- snapshot, which is Registration C fitting through source_key with no second
+-- migration. 06 is the academic calendar, scoped to an academic year.
+
+select pg_temp.expect('service_role inserts campus_snapshots',
+  $q$insert into public.campus_snapshots (id, source_key, scope_key, source_url, fetched_from, page_last_updated, content_hash, row_count, header, status) values
+     ('c0000000-0000-4000-8000-000000000001', 'schedule',  'fall-2026',    'https://www.sjsu.edu/classes/schedules/fall-2026.php', 'https://www.sjsu.edu/classes/schedules/fall-2026.php', '2026-09-30', 'h1', 3, '["Section","Class Number"]', 'current'),
+     ('c0000000-0000-4000-8000-000000000002', 'schedule',  'fall-2026',    'https://www.sjsu.edu/classes/schedules/fall-2026.php', 'https://www.sjsu.edu/classes/schedules/fall-2026.php', '2026-10-01', 'h2', 4, '["Section","Class Number"]', 'staged'),
+     ('c0000000-0000-4000-8000-000000000003', 'registrar', 'fall-2026',    'https://www.sjsu.edu/registrar/calendar/fall-2026.php', null, null, 'h3', 2, null, 'superseded'),
+     ('c0000000-0000-4000-8000-000000000004', 'exams',     'fall-2026',    'https://www.sjsu.edu/classes/final-exam-schedule/fall-2026.php', null, null, 'h4', 2, null, 'superseded'),
+     ('c0000000-0000-4000-8000-000000000005', 'bursar',    'fall-2026',    'https://www.sjsu.edu/bursar/fees-due-dates/payment-due-dates/fall.php', null, null, 'h5', 1, null, 'staged'),
+     ('c0000000-0000-4000-8000-000000000006', 'academic',  'ay-2026-2027', 'https://www.sjsu.edu/classes/calendar/2026-2027.php', null, null, 'h6', 1, null, 'current')$q$,
+  false, 'service_role');
+select pg_temp.expect('service_role inserts campus_current',
+  $q$insert into public.campus_current (source_key, scope_key, snapshot_id) values
+     ('schedule', 'fall-2026',    'c0000000-0000-4000-8000-000000000001'),
+     ('academic', 'ay-2026-2027', 'c0000000-0000-4000-8000-000000000006')$q$,
+  false, 'service_role');
+select pg_temp.expect('service_role inserts campus_refresh_runs',
+  $q$insert into public.campus_refresh_runs (outcome, finished_at, stats) values ('success', now(), '{"schedule": {"rows": 3, "swapped": true}}')$q$,
+  false, 'service_role');
+-- The same class numbers under both schedule snapshots: unique per snapshot,
+-- not globally. 40003 is a two-meeting section with a TBA second meeting, the
+-- shape 473 rows of the Fall 2026 page have.
+select pg_temp.expect('service_role inserts reg_class_sections',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, section, satisfies_raw, satisfies, days, start_time, end_time, times_raw, meetings, meeting_count, instructor) values
+     ('c0000000-0000-4000-8000-000000000001', 43104, 'PHYS 50',  '25', null,         '{}',      'TR', '13:30', '14:45', '1:30PM-2:45PM', '[{"days":"TR","start_time":"13:30","end_time":"14:45","location":"SCI 142","instructor":"Staff"}]', 1, 'Staff'),
+     ('c0000000-0000-4000-8000-000000000001', 40002, 'PHIL 186', '01', 'GE: 5A+5C',  '{5A,5C}', 'MW', '09:00', '10:15', '9:00AM-10:15AM', '[{"days":"MW","start_time":"09:00","end_time":"10:15","location":"BBC 202","instructor":"A / A"}]', 1, 'A / A'),
+     ('c0000000-0000-4000-8000-000000000001', 40003, 'ENGR 10',  '02', 'GE:3B+US23', '{3B,US23}', 'MW', '10:30', '11:45', '10:30AM-11:45AM<br>TBA', '[{"days":"MW","start_time":"10:30","end_time":"11:45","location":"ENG 189","instructor":"B"},{"days":"TBA","start_time":null,"end_time":null,"location":"ONLINE","instructor":"B"}]', 2, 'B / B'),
+     ('c0000000-0000-4000-8000-000000000002', 43104, 'PHYS 50',  '25', null,         '{}',      'TR', '13:30', '14:45', '1:30PM-2:45PM', '[{"days":"TR","start_time":"13:30","end_time":"14:45","location":"SCI 142","instructor":"Staff"}]', 1, 'Staff'),
+     ('c0000000-0000-4000-8000-000000000002', 40002, 'PHIL 186', '01', 'GE: 5A+5C',  '{5A,5C}', 'MW', '09:00', '10:15', '9:00AM-10:15AM', '[{"days":"MW","start_time":"09:00","end_time":"10:15","location":"BBC 202","instructor":"A / A"}]', 1, 'A / A'),
+     ('c0000000-0000-4000-8000-000000000002', 40003, 'ENGR 10',  '02', 'GE:3B+US23', '{3B,US23}', 'MW', '10:30', '11:45', '10:30AM-11:45AM<br>TBA', '[{"days":"MW","start_time":"10:30","end_time":"11:45","location":"ENG 189","instructor":"B"},{"days":"TBA","start_time":null,"end_time":null,"location":"ONLINE","instructor":"B"}]', 2, 'B / B')$q$,
+  false, 'service_role');
+-- A December-to-January range is legal: the date-order check rejects only an
+-- end before its start.
+select pg_temp.expect('service_role inserts reg_term_events (registrar, payment, academic)',
+  $q$insert into public.reg_term_events (snapshot_id, category, label_raw, date_raw, start_date, end_date, event_key) values
+     ('c0000000-0000-4000-8000-000000000003', 'registrar', 'Last day to add classes', 'Tue, Sep. 15', '2026-09-15', null, 'last_day_to_add'),
+     ('c0000000-0000-4000-8000-000000000003', 'registrar', 'Campus closed', 'Mon, Dec. 21 - Sun, Jan. 3', '2026-12-21', '2027-01-03', null),
+     ('c0000000-0000-4000-8000-000000000005', 'payment',   'First installment due', 'Aug. 15', '2026-08-15', null, 'first_installment_due'),
+     ('c0000000-0000-4000-8000-000000000006', 'academic',  'First day of instruction', 'Thu, Aug. 20', '2026-08-20', null, 'instruction_begins')$q$,
+  false, 'service_role');
+select pg_temp.expect('service_role inserts reg_exam_rules (a rule and an exception)',
+  $q$insert into public.reg_exam_rules (snapshot_id, day_patterns, start_time_from, start_time_to, exam_date, exam_start, exam_end, is_exception, course_keys, note, raw) values
+     ('c0000000-0000-4000-8000-000000000004', '{MW,MWF,M,W}', '09:00', '10:15', '2026-12-14', '09:45', '12:00', false, '{}', null, '{"cells": ["MW, MWF, M, W", "0900-1015", "Mon, Dec. 14", "0945-1200"]}'),
+     ('c0000000-0000-4000-8000-000000000004', '{}', null, null, '2026-12-12', '08:00', '10:15', true, '{"MATH 19","MATH 30"}', 'Common final', '{"cells": ["MATH 19, 30", "Sat, Dec. 12", "0800-1015"]}')$q$,
+  false, 'service_role');
+
+-- anon and alice, against every table. SELECT must raise rather than return
+-- zero rows: zero rows is also what RLS alone would produce, so only a raise
+-- proves the revoke is there. RLS is tested on its own further down. Each
+-- insert names valid values, so a refusal cannot come from a constraint.
+DO $$
+DECLARE t record;
+BEGIN
+  FOR t IN SELECT * FROM (VALUES
+    ('campus_snapshots',
+     $i$insert into public.campus_snapshots (source_key, scope_key, source_url, content_hash) values ('schedule', 'spring-2027', 'https://example.invalid/forged', 'x')$i$),
+    ('campus_current',
+     $i$insert into public.campus_current (source_key, scope_key, snapshot_id) values ('bursar', 'fall-2026', 'c0000000-0000-4000-8000-000000000005')$i$),
+    ('campus_refresh_runs',
+     $i$insert into public.campus_refresh_runs (outcome) values ('success')$i$),
+    ('reg_class_sections',
+     $i$insert into public.reg_class_sections (snapshot_id, class_number, course_key) values ('c0000000-0000-4000-8000-000000000002', 49999, 'CS 999')$i$),
+    ('reg_term_events',
+     $i$insert into public.reg_term_events (snapshot_id, category, label_raw, date_raw) values ('c0000000-0000-4000-8000-000000000005', 'payment', 'Forged deadline', 'Mon, Jan. 4')$i$),
+    ('reg_exam_rules',
+     $i$insert into public.reg_exam_rules (snapshot_id, note) values ('c0000000-0000-4000-8000-000000000004', 'forged')$i$)
+  ) AS v(tbl, ins)
+  LOOP
+    PERFORM pg_temp.expect('anon reads ' || t.tbl, 'select 1 from public.' || t.tbl, true, 'anon');
+    PERFORM pg_temp.expect('alice reads ' || t.tbl, 'select 1 from public.' || t.tbl, true,
+                           'authenticated', '11111111-1111-1111-1111-111111111111');
+    PERFORM pg_temp.expect('anon inserts into ' || t.tbl, t.ins, true, 'anon');
+    PERFORM pg_temp.expect('alice inserts into ' || t.tbl, t.ins, true,
+                           'authenticated', '11111111-1111-1111-1111-111111111111');
+  END LOOP;
+END $$;
+
+-- The writes that would cost the most: re-pointing every reader at a snapshot
+-- of alice's choosing, and deleting the data they are on.
+select pg_temp.expect_rows('alice re-points campus_current',
+  $q$update public.campus_current set snapshot_id = 'c0000000-0000-4000-8000-000000000002' where source_key = 'schedule'$q$,
+  0, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('alice deletes a campus snapshot',
+  $q$delete from public.campus_snapshots where id = 'c0000000-0000-4000-8000-000000000002'$q$,
+  0, 'authenticated', '11111111-1111-1111-1111-111111111111');
+select pg_temp.expect_rows('anon deletes reg_term_events',
+  $q$delete from public.reg_term_events$q$, 0, 'anon');
+
+-- The outer wall, read from the catalog rather than inferred from a refusal.
+-- has_table_privilege also counts what a role inherits through PUBLIC.
+DO $$
+DECLARE
+  tbls text[] := array['campus_snapshots', 'campus_current', 'campus_refresh_runs',
+                       'reg_class_sections', 'reg_term_events', 'reg_exam_rules'];
+  missing text; leftover text; no_rls text; pols text;
+BEGIN
+  SELECT string_agg(t, ', ') INTO missing FROM unnest(tbls) t
+   WHERE to_regclass('public.' || t) IS NULL;
+  IF missing IS NOT NULL THEN
+    RAISE NOTICE '  FAIL campus tables missing: %', missing;
+    RETURN;
+  END IF;
+
+  SELECT string_agg(r || ':' || t || ':' || p, ', ') INTO leftover
+    FROM unnest(array['anon', 'authenticated']) r,
+         unnest(tbls) t,
+         unnest(array['SELECT', 'INSERT', 'UPDATE', 'DELETE',
+                      'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN']) p
+   WHERE has_table_privilege(r::name, 'public.' || t, p);
+  IF leftover IS NULL THEN
+    RAISE NOTICE '  ok   anon and authenticated hold no privilege on any campus table';
+  ELSE RAISE NOTICE '  FAIL campus table privileges still granted: %', leftover; END IF;
+
+  SELECT string_agg(t, ', ') INTO no_rls
+    FROM unnest(tbls) t JOIN pg_class c ON c.oid = ('public.' || t)::regclass
+   WHERE NOT c.relrowsecurity;
+  IF no_rls IS NULL THEN RAISE NOTICE '  ok   RLS is enabled on all six campus tables';
+  ELSE RAISE NOTICE '  FAIL RLS is off on: %', no_rls; END IF;
+
+  SELECT string_agg(tablename || ':' || policyname, ', ') INTO pols
+    FROM pg_policies WHERE schemaname = 'public' AND tablename = ANY (tbls);
+  IF pols IS NULL THEN RAISE NOTICE '  ok   no campus table has a policy (service_role only)';
+  ELSE RAISE NOTICE '  FAIL campus tables have policies: %', pols; END IF;
+END $$;
+
+-- The inner wall on its own. Restore the SELECT the revoke removed (section 12
+-- sets the precedent for harness-local DDL) and RLS, with no policy to admit
+-- anyone, must still hide every row. The tables are not empty, or zero rows
+-- would prove nothing.
+grant select on public.campus_snapshots, public.campus_current, public.campus_refresh_runs,
+                public.reg_class_sections, public.reg_term_events, public.reg_exam_rules
+  to anon, authenticated;
+DO $$
+DECLARE
+  t text; total int; as_alice int; as_anon int;
+  leaks text[] := '{}'; empties text[] := '{}';
+BEGIN
+  FOREACH t IN ARRAY array['campus_snapshots', 'campus_current', 'campus_refresh_runs',
+                           'reg_class_sections', 'reg_term_events', 'reg_exam_rules'] LOOP
+    EXECUTE format('select count(*) from public.%I', t) INTO total;
+    IF total = 0 THEN empties := empties || t; END IF;
+    PERFORM set_config('role', 'authenticated', true);
+    PERFORM set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', true);
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+    EXECUTE format('select count(*) from public.%I', t) INTO as_alice;
+    PERFORM set_config('role', 'anon', true);
+    EXECUTE format('select count(*) from public.%I', t) INTO as_anon;
+    PERFORM set_config('role', 'postgres', true);
+    IF as_alice + as_anon > 0 THEN
+      leaks := leaks || format('%s (alice %s, anon %s of %s)', t, as_alice, as_anon, total);
+    END IF;
+  END LOOP;
+  IF cardinality(empties) > 0 THEN
+    RAISE NOTICE '  FAIL RLS check is vacuous, empty tables: %', array_to_string(empties, ', ');
+  ELSIF cardinality(leaks) = 0 THEN
+    RAISE NOTICE '  ok   with SELECT granted back, RLS alone still hides every campus row';
+  ELSE
+    RAISE NOTICE '  FAIL RLS let rows through: %', array_to_string(leaks, '; ');
+  END IF;
+EXCEPTION WHEN others THEN
+  PERFORM set_config('role', 'postgres', true);
+  RAISE NOTICE '  FAIL RLS wall check raised: %', substr(sqlerrm, 1, 65);
+END $$;
+revoke select on public.campus_snapshots, public.campus_current, public.campus_refresh_runs,
+                 public.reg_class_sections, public.reg_term_events, public.reg_exam_rules
+  from anon, authenticated;
+
+-- Class search and the cascade both depend on these indexes. Without them
+-- everything still works and silently scans 7,000 rows per snapshot.
+DO $$
+DECLARE missing text[] := '{}'; t text;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'reg_class_sections'
+                    AND indexdef LIKE 'CREATE UNIQUE INDEX % USING btree (snapshot_id, class_number)')
+    THEN missing := missing || 'unique (snapshot_id, class_number)'::text; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'reg_class_sections'
+                    AND indexdef LIKE '% USING gin (satisfies)')
+    THEN missing := missing || 'gin (satisfies)'::text; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'reg_class_sections'
+                    AND indexdef LIKE '% USING btree (snapshot_id, course_key%')
+    THEN missing := missing || '(snapshot_id, course_key)'::text; END IF;
+  FOREACH t IN ARRAY array['reg_term_events', 'reg_exam_rules'] LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = t
+                      AND indexdef LIKE '% USING btree (snapshot_id%')
+      THEN missing := missing || (t || ' (snapshot_id ...)'); END IF;
+  END LOOP;
+  IF cardinality(missing) = 0 THEN
+    RAISE NOTICE '  ok   campus indexes: unique class number per snapshot, GIN satisfies, snapshot_id on every child';
+  ELSE RAISE NOTICE '  FAIL campus indexes missing: %', array_to_string(missing, ', '); END IF;
+END $$;
+
+-- What class search will send for ge=5C. PostgREST's `satisfies=cs.{5C}` is
+-- `satisfies @> '{5C}'`; a cell naming two areas matches either.
+select pg_temp.expect_rows('service_role finds a section by one area of a combined GE cell',
+  $q$select 1 from public.reg_class_sections where snapshot_id = 'c0000000-0000-4000-8000-000000000002' and satisfies @> '{5C}'$q$,
+  1, 'service_role');
+-- Nothing constrains what a tag may say: the vocabulary belongs to the parser.
+select pg_temp.expect('satisfies accepts tags in any spelling',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, satisfies_raw, satisfies) values ('c0000000-0000-4000-8000-000000000002', 40004, 'KIN 1', 'GE: 1Bor4', '{"GE: 1Bor4","PE: PhysEd","AI: US1",GWAR,WID}')$q$,
+  false, 'service_role');
+
+-- Constraints bind the service role too. They are what stop a refresh bug from
+-- writing rows that no reader will ever look up, or that answer wrongly.
+select pg_temp.expect('an unknown source_key is rejected',
+  $q$insert into public.campus_snapshots (source_key, scope_key, source_url, content_hash) values ('catalog', 'fall-2026', 'https://example.invalid/x', 'x')$q$,
+  true, 'service_role');
+select pg_temp.expect('a two-digit year scope_key is rejected (fall-26)',
+  $q$insert into public.campus_snapshots (source_key, scope_key, source_url, content_hash) values ('schedule', 'fall-26', 'https://example.invalid/x', 'x')$q$,
+  true, 'service_role');
+select pg_temp.expect('a display-form scope_key is rejected (Fall 2026)',
+  $q$insert into public.campus_snapshots (source_key, scope_key, source_url, content_hash) values ('schedule', 'Fall 2026', 'https://example.invalid/x', 'x')$q$,
+  true, 'service_role');
+select pg_temp.expect('an unknown snapshot status is rejected',
+  $q$insert into public.campus_snapshots (source_key, scope_key, source_url, content_hash, status) values ('schedule', 'winter-2027', 'https://example.invalid/x', 'x', 'live')$q$,
+  true, 'service_role');
+select pg_temp.expect('an unknown refresh outcome is rejected',
+  $q$insert into public.campus_refresh_runs (outcome) values ('ok')$q$,
+  true, 'service_role');
+-- The page's own duplicate (PHYS 50 section 25). The parser drops exact
+-- duplicates; one that gets this far is a parser bug and must fail the batch.
+select pg_temp.expect('a duplicate class number within one snapshot is rejected (43104)',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, section) values ('c0000000-0000-4000-8000-000000000002', 43104, 'PHYS 50', '25')$q$,
+  true, 'service_role');
+-- A count of 1 against two meetings would let the final-exam lookup compute a
+-- slot from the first pattern alone, which is exactly the guess it must refuse.
+select pg_temp.expect('a meeting_count that disagrees with meetings is rejected',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings, meeting_count) values ('c0000000-0000-4000-8000-000000000002', 40005, 'ENGR 10', '[{"days":"MW"},{"days":"TBA"}]', 1)$q$,
+  true, 'service_role');
+select pg_temp.expect('a meetings value that is not an array is rejected',
+  $q$insert into public.reg_class_sections (snapshot_id, class_number, course_key, meetings) values ('c0000000-0000-4000-8000-000000000002', 40006, 'ENGR 10', '{"days":"MW"}')$q$,
+  true, 'service_role');
+select pg_temp.expect('an unknown event category is rejected',
+  $q$insert into public.reg_term_events (snapshot_id, category, label_raw, date_raw) values ('c0000000-0000-4000-8000-000000000003', 'parking', 'x', 'x')$q$,
+  true, 'service_role');
+-- 'Dec. 21 - Jan. 3' with both years inferred as 2026: the wrong-deadline bug.
+select pg_temp.expect('an event that ends before it starts is rejected',
+  $q$insert into public.reg_term_events (snapshot_id, category, label_raw, date_raw, start_date, end_date) values ('c0000000-0000-4000-8000-000000000003', 'registrar', 'Campus closed', 'Mon, Dec. 21 - Sun, Jan. 3', '2026-12-21', '2026-01-03')$q$,
+  true, 'service_role');
+
+-- campus_current's ON DELETE RESTRICT. A prune whose filter sweeps the snapshot
+-- readers are on is refused as a whole statement, so it deletes nothing at all,
+-- including the staged snapshot it also matched.
+select pg_temp.expect('a prune that sweeps the current snapshot is refused',
+  $q$delete from public.campus_snapshots where source_key = 'schedule' and scope_key = 'fall-2026'$q$,
+  true, 'service_role');
+select pg_temp.expect_rows('the refused prune deleted nothing',
+  $q$select 1 from public.campus_snapshots where source_key = 'schedule' and scope_key = 'fall-2026'$q$,
+  2, 'service_role');
+select pg_temp.expect('the current snapshot cannot be deleted by id',
+  $q$delete from public.campus_snapshots where id = 'c0000000-0000-4000-8000-000000000001'$q$,
+  true, 'service_role');
+-- The composite key: the schedule pointer can only name a schedule snapshot
+-- for the same term.
+select pg_temp.expect('campus_current cannot point schedule/fall-2026 at the bursar snapshot',
+  $q$update public.campus_current set snapshot_id = 'c0000000-0000-4000-8000-000000000005' where source_key = 'schedule' and scope_key = 'fall-2026'$q$,
+  true, 'service_role');
+
+-- The refresh's own sequence, as the service role: flip, then bookkeeping,
+-- then prune.
+select pg_temp.expect_rows('service_role flips schedule/fall-2026 to the staged snapshot',
+  $q$update public.campus_current set snapshot_id = 'c0000000-0000-4000-8000-000000000002', verified_at = now() where source_key = 'schedule' and scope_key = 'fall-2026'$q$,
+  1, 'service_role');
+select pg_temp.expect_rows('service_role marks the old snapshot superseded and the new one current',
+  $q$update public.campus_snapshots set status = case when id = 'c0000000-0000-4000-8000-000000000001' then 'superseded' else 'current' end where id in ('c0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000002')$q$,
+  2, 'service_role');
+
+-- The cascade. The prune excludes the ids campus_current names, which is the
+-- shape the refresh needs: `status` alone is bookkeeping and can lag the pointer.
+DO $$
+DECLARE
+  gone uuid[] := array['c0000000-0000-4000-8000-000000000001',
+                       'c0000000-0000-4000-8000-000000000003',
+                       'c0000000-0000-4000-8000-000000000004']::uuid[];
+  pruned int;
+  sec_before int; evt_before int; rule_before int;
+  sec_after int;  evt_after int;  rule_after int;
+  sec_kept_before int; evt_kept_before int;
+  sec_kept_after int;  evt_kept_after int;
+BEGIN
+  SELECT count(*) INTO sec_before  FROM public.reg_class_sections WHERE snapshot_id = ANY (gone);
+  SELECT count(*) INTO evt_before  FROM public.reg_term_events    WHERE snapshot_id = ANY (gone);
+  SELECT count(*) INTO rule_before FROM public.reg_exam_rules     WHERE snapshot_id = ANY (gone);
+  SELECT count(*) INTO sec_kept_before FROM public.reg_class_sections WHERE NOT snapshot_id = ANY (gone);
+  SELECT count(*) INTO evt_kept_before FROM public.reg_term_events    WHERE NOT snapshot_id = ANY (gone);
+
+  PERFORM set_config('role', 'service_role', true);
+  DELETE FROM public.campus_snapshots
+   WHERE status = 'superseded'
+     AND id NOT IN (SELECT snapshot_id FROM public.campus_current);
+  GET DIAGNOSTICS pruned = ROW_COUNT;
+  PERFORM set_config('role', 'postgres', true);
+
+  SELECT count(*) INTO sec_after  FROM public.reg_class_sections WHERE snapshot_id = ANY (gone);
+  SELECT count(*) INTO evt_after  FROM public.reg_term_events    WHERE snapshot_id = ANY (gone);
+  SELECT count(*) INTO rule_after FROM public.reg_exam_rules     WHERE snapshot_id = ANY (gone);
+  SELECT count(*) INTO sec_kept_after FROM public.reg_class_sections WHERE NOT snapshot_id = ANY (gone);
+  SELECT count(*) INTO evt_kept_after FROM public.reg_term_events    WHERE NOT snapshot_id = ANY (gone);
+
+  IF pruned = 3 THEN RAISE NOTICE '  ok   service_role prunes the 3 superseded snapshots';
+  ELSE RAISE NOTICE '  FAIL prune deleted % snapshots, expected 3', pruned; END IF;
+
+  IF sec_before > 0 AND sec_after = 0 AND sec_kept_after = sec_kept_before THEN
+    RAISE NOTICE '  ok   pruning cascades to reg_class_sections (% gone, % kept)', sec_before, sec_kept_after;
+  ELSE RAISE NOTICE '  FAIL reg_class_sections cascade: % -> % pruned rows, % -> % kept rows',
+         sec_before, sec_after, sec_kept_before, sec_kept_after; END IF;
+
+  IF evt_before > 0 AND evt_after = 0 AND evt_kept_after = evt_kept_before THEN
+    RAISE NOTICE '  ok   pruning cascades to reg_term_events (% gone, % kept)', evt_before, evt_kept_after;
+  ELSE RAISE NOTICE '  FAIL reg_term_events cascade: % -> % pruned rows, % -> % kept rows',
+         evt_before, evt_after, evt_kept_before, evt_kept_after; END IF;
+
+  IF rule_before > 0 AND rule_after = 0 THEN
+    RAISE NOTICE '  ok   pruning cascades to reg_exam_rules (% gone)', rule_before;
+  ELSE RAISE NOTICE '  FAIL reg_exam_rules cascade: % -> % rows', rule_before, rule_after; END IF;
+EXCEPTION WHEN others THEN
+  PERFORM set_config('role', 'postgres', true);
+  RAISE NOTICE '  FAIL the prune raised: %', substr(sqlerrm, 1, 65);
+END $$;
+
+-- And the protection follows the pointer: the snapshot readers are on now is
+-- the one that can't be deleted.
+select pg_temp.expect('the newly current snapshot cannot be deleted',
+  $q$delete from public.campus_snapshots where id = 'c0000000-0000-4000-8000-000000000002'$q$,
+  true, 'service_role');
