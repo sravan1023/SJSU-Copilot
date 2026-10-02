@@ -220,7 +220,7 @@ def test_empty_routers_leave_the_stream_unchanged():
     done = frames[-1]
     assert set(done) == {
         "done", "full_response", "validators_run", "validators_passed",
-        "repairs_applied", "sources", "request_id",
+        "repairs_applied", "sources", "request_id", "student_context_used",
     }
     assert rag_calls == 1 and route.call_count == 1
     assert "answer_route" not in timing.counters

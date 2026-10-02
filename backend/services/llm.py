@@ -301,6 +301,7 @@ async def stream_chat(
     sources: list[dict] | None = None,
     request_id: str | None = None,
     audience: str | None = None,
+    student_context_prompt: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Stream chat completion from Groq. Yields SSE-formatted lines:
@@ -308,6 +309,9 @@ async def stream_chat(
       data: {"done": true, ...}    — final message with validator metadata
 
     Uses Groq for completion with behavior policy, optional memory, and optional RAG context.
+    `student_context_prompt` is the rendered student slot (services/student_context.py);
+    it goes only to fit_prompt, and `student_context_used` on the done frame says
+    whether it survived trimming.
     """
     api_key = _get_api_key()
     model_id = resolve_model(model)
@@ -322,7 +326,10 @@ async def stream_chat(
         rag_prompt=rag_prompt,
         messages=messages,
         limits=limits_from_env(),
+        student_context=student_context_prompt,
     )
+    # fit_prompt drops the slot last, so "supplied" is not "sent".
+    student_context_used = bool(student_context_prompt) and not fitted.report.student_context_dropped
     if fitted.report.trimmed:
         logger.info(
             "request trimmed to token budget",
@@ -344,6 +351,8 @@ async def stream_chat(
     observability.record("model_id", model_id)
     observability.record("prompt_chars", sum(len(m["content"]) for m in body["messages"]))
     observability.record("prompt_trimmed", 1 if fitted.report.trimmed else 0)
+    if student_context_prompt:
+        observability.record("student_context_used", 1 if student_context_used else 0)
 
     full_response = ""
 
@@ -455,7 +464,12 @@ async def stream_chat(
             )
 
     # Final done event
-    done_payload = {"done": True, "full_response": full_response, **validator_meta}
+    done_payload = {
+        "done": True,
+        "full_response": full_response,
+        **validator_meta,
+        "student_context_used": student_context_used,
+    }
     if sources:
         done_payload["sources"] = sources
     if request_id:

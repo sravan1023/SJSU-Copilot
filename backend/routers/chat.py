@@ -15,7 +15,9 @@ import ratelimit
 from auth import Principal
 from ratelimit import rate_limited
 from services import structured_answers
+from services import student_context as student_ctx
 from services.llm import stream_chat, generate_title
+from services.token_budget import count_tokens
 from services.web_search import build_rag_prompt
 from services.conversation_state import (
     analyze_conversation_state,
@@ -83,6 +85,12 @@ class ChatRequest(BaseModel):
     # is total, and rejecting a request because a client sent a stale audience
     # id would break the chat over a cosmetic field.
     audience: str | None = Field(default=None, max_length=32)
+    # The student's own profile facts, for the generation prompt only. Bounds are
+    # on the model (an oversize or unknown-field payload is a 422). A guest's, or
+    # any when DEGREE_CONTEXT_ENABLED is off, is dropped below rather than
+    # rejected: a client that sends it has done nothing wrong.
+    student_context: student_ctx.StudentContext | None = None
+
     _check_messages = field_validator("messages")(_check_total_chars)
 
 
@@ -180,6 +188,9 @@ def _prefix_failure_frames(prefix: str, streamed: str, answer, request_id: str) 
         "validators_passed": True,
         "repairs_applied": [],
         "answer_mode": "prefix",
+        # The answer was cut short, so the "based on your profile" caveat has
+        # nothing to attach to.
+        "student_context_used": False,
         "request_id": request_id,
     }
     if answer.card is not None:
@@ -282,6 +293,19 @@ async def chat(
         observability.record("principal", principal.kind)
         observability.record("audience", audience)
         observability.record("history_messages", len(messages))
+        # Decided once, here, and kept out of `messages` and out of every call
+        # retrieval makes: the digest may only ever reach the generation prompt.
+        student_context_prompt = None
+        if req.student_context is None:
+            observability.record("student_context", "none")
+        elif principal.kind != "user":
+            observability.record("student_context", "dropped_guest")
+        elif not student_ctx.enabled():
+            observability.record("student_context", "disabled")
+        else:
+            student_context_prompt = student_ctx.render(req.student_context) or None
+            observability.record("student_context", student_ctx.label(req.student_context))
+            observability.record("student_context_tokens", count_tokens(student_context_prompt))
         outcome = "ok"
         # Set before anything can raise, so the failure paths can tell whether a
         # prefix card is already on the client's screen. `streamed` is the model
@@ -318,6 +342,7 @@ async def chat(
                     "validators_passed": True,
                     "repairs_applied": [],
                     "answer_mode": "structured",
+                    "student_context_used": False,
                     "card": structured.card,
                     "request_id": request_id,
                 }
@@ -371,6 +396,7 @@ async def chat(
                 sources=sources,
                 request_id=request_id,
                 audience=audience,
+                student_context_prompt=student_context_prompt,
             ):
                 if frame.startswith('data: {"error"'):
                     outcome = "upstream_error"
