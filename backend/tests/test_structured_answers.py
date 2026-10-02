@@ -47,13 +47,13 @@ def _groq_ok(*deltas):
 
 
 def _chat(routers, content="when is the add deadline", deltas=("Model answer.",),
-          groq_response=None, stream_chat_patch=None):
+          groq_response=None, stream_chat_patch=None, rag_sources=None):
     """POST /api/chat; return (frames, groq route, rag call count, timing record)."""
     rag_calls = []
 
     async def _rag(messages, audience=None, **_kw):
         rag_calls.append(1)
-        return RAG, RAG_SOURCES
+        return RAG, rag_sources or RAG_SOURCES
 
     capture = _Capture()
     logging.getLogger("timings").addHandler(capture)
@@ -401,4 +401,85 @@ def test_prefix_sources_survive_a_failed_generation():
     extra = [{"title": "Cares", "url": "https://www.sjsu.edu/sjsucares/"}]
     ans = Answer(mode="prefix", markdown=CARD_MD, sources=extra)
     frames, _, _, _ = _chat([_router(ans)], groq_response=httpx.Response(500, text="down"))
-    assert frames[-1]["done"] is True and frames[-1]["sources"] == extra
+    assert frames[-1]["done"] is True and frames[-1]["sources"] == RAG_SOURCES + extra
+
+
+def test_a_failed_prefix_turn_keeps_retrieval_sources_first():
+    # The model streamed "[1]" before the provider died, so [1] must still be
+    # the retrieval page, not the card's.
+    retrieved = [
+        {"title": f"Page {i}", "url": f"https://www.sjsu.edu/page{i}"} for i in range(1, 4)
+    ]
+    extra = [{"title": "Cares", "url": "https://www.sjsu.edu/sjsucares/"}]
+    ans = Answer(mode="prefix", markdown=CARD_MD, sources=extra)
+
+    async def broken(**_kw):
+        yield 'data: {"token": "See [1]"}\n\n'
+        raise httpx.ReadError("connection reset")
+
+    frames, _, _, timing = _chat(
+        [_router(ans)], stream_chat_patch=broken, rag_sources=retrieved
+    )
+
+    done = frames[-1]
+    assert done["done"] is True and not any("error" in f for f in frames)
+    assert "See [1]" in done["full_response"]
+    assert done["sources"] == retrieved + extra
+    assert done["sources"][:3] == retrieved
+    assert timing.outcome == "error"
+
+
+def test_a_failed_prefix_turn_on_a_provider_error_frame_keeps_retrieval_sources_first():
+    retrieved = [{"title": "Page 1", "url": "https://www.sjsu.edu/page1"}]
+    extra = [{"title": "Cares", "url": "https://www.sjsu.edu/sjsucares/"}]
+    ans = Answer(mode="prefix", markdown=CARD_MD, sources=extra)
+    frames, _, _, timing = _chat(
+        [_router(ans)], groq_response=httpx.Response(500, text="down"), rag_sources=retrieved
+    )
+    assert frames[-1]["sources"] == retrieved + extra
+    assert timing.outcome == "upstream_error"
+
+
+def test_a_render_failure_releases_the_slot_and_ends_in_an_error_frame():
+    from services import student_context as student_ctx
+    import ratelimit
+
+    def boom(_ctx):
+        raise RuntimeError("render exploded")
+
+    payload = {
+        "messages": [{"role": "user", "content": "what classes do I need"}],
+        "model": "quality",
+        "student_context": {"program": "Computer Science"},
+    }
+
+    async def go():
+        transport = httpx.ASGITransport(app=main.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            out = []
+            for _ in range(2):
+                res = await client.post("/api/chat", json=payload, headers=AUTH_HEADERS)
+                frames = [json.loads(l[6:]) for l in res.text.splitlines() if l.startswith("data: ")]
+                out.append((res.status_code, frames))
+            return out
+
+    env = {
+        "GROQ_API_KEY": "test-key",
+        "DEGREE_CONTEXT_ENABLED": "true",
+        # Enforcement on with a cap of one: a leaked slot makes the second call a 429.
+        "RATE_LIMIT_ENABLED": "true",
+        "MAX_CONCURRENT_PER_PRINCIPAL": "1",
+    }
+    ratelimit.clear_rate_limits()
+    try:
+        with patch.object(student_ctx, "render", boom), \
+             patch("routers.chat.build_rag_prompt", lambda *a, **k: (_ for _ in ()).throw(AssertionError("unreached"))), \
+             patch.dict("os.environ", env):
+            results = asyncio.run(go())
+        assert ratelimit._inflight == {}
+    finally:
+        ratelimit.clear_rate_limits()
+
+    for status, frames in results:
+        assert status == 200  # the second request was not turned away at the cap
+        assert "error" in frames[-1] and "done" not in frames[-1]

@@ -171,7 +171,13 @@ def _merge_sources(model_sources: list[dict] | None, extra: list[dict]) -> list[
     return merged
 
 
-def _prefix_failure_frames(prefix: str, streamed: str, answer, request_id: str) -> list[str]:
+def _prefix_failure_frames(
+    prefix: str,
+    streamed: str,
+    answer,
+    request_id: str,
+    retrieval_sources: list[dict] | None = None,
+) -> list[str]:
     """Close a prefix-mode turn whose generation failed, keeping the card.
 
     The client throws on an `error` frame and the UI then overwrites the message
@@ -179,6 +185,10 @@ def _prefix_failure_frames(prefix: str, streamed: str, answer, request_id: str) 
     card. A terminal `done` whose full_response is the card plus a short note
     is the only shape that keeps and stores it. `streamed` is whatever model
     text the client already rendered, so the saved text matches the screen.
+
+    `retrieval_sources` go first, as in the normal done frame: the model may
+    already have streamed "[1]", and that must keep pointing at the page it
+    cited, not at the card's.
     """
     note = ("\n\n" if streamed else "") + PREFIX_FAILURE_LINE
     done = {
@@ -195,8 +205,9 @@ def _prefix_failure_frames(prefix: str, streamed: str, answer, request_id: str) 
     }
     if answer.card is not None:
         done["card"] = answer.card
-    if answer.sources:
-        done["sources"] = list(answer.sources)
+    merged = _merge_sources(retrieval_sources, answer.sources)
+    if merged:
+        done["sources"] = merged
     return [_sse({"token": note}), _sse(done)]
 
 
@@ -293,25 +304,26 @@ async def chat(
         observability.record("principal", principal.kind)
         observability.record("audience", audience)
         observability.record("history_messages", len(messages))
-        # Decided once, here, and kept out of `messages` and out of every call
-        # retrieval makes: the digest may only ever reach the generation prompt.
-        student_context_prompt = None
-        if req.student_context is None:
-            observability.record("student_context", "none")
-        elif principal.kind != "user":
-            observability.record("student_context", "dropped_guest")
-        elif not student_ctx.enabled():
-            observability.record("student_context", "disabled")
-        else:
-            student_context_prompt = student_ctx.render(req.student_context) or None
-            observability.record("student_context", student_ctx.label(req.student_context))
-            observability.record("student_context_tokens", count_tokens(student_context_prompt))
         outcome = "ok"
         # Set before anything can raise, so the failure paths can tell whether a
         # prefix card is already on the client's screen. `streamed` is the model
         # text sent after it.
         prefix_text, streamed, structured = "", "", None
+        retrieval_sources: list[dict] = []
+        student_context_prompt = None
         try:
+            # Decided once, here, and kept out of `messages` and out of every call
+            # retrieval makes: the digest may only ever reach the generation prompt.
+            if req.student_context is None:
+                observability.record("student_context", "none")
+            elif principal.kind != "user":
+                observability.record("student_context", "dropped_guest")
+            elif not student_ctx.enabled():
+                observability.record("student_context", "disabled")
+            else:
+                student_context_prompt = student_ctx.render(req.student_context) or None
+                observability.record("student_context", student_ctx.label(req.student_context))
+                observability.record("student_context_tokens", count_tokens(student_context_prompt))
             yield _sse({"status": "received", "request_id": request_id})
 
             with observability.stage("behavior_compute"):
@@ -373,6 +385,7 @@ async def chat(
                             rag_prompt, sources = item[1]
                         else:
                             yield item
+            retrieval_sources = sources
 
             # Retrieval can take seconds; don't pay for generation if the user
             # already navigated away or hit stop.
@@ -402,7 +415,7 @@ async def chat(
                     outcome = "upstream_error"
                     if prefix_text:
                         for out in _prefix_failure_frames(
-                            prefix_text, streamed, structured, request_id
+                            prefix_text, streamed, structured, request_id, retrieval_sources
                         ):
                             yield out
                         return
@@ -432,7 +445,7 @@ async def chat(
             logger.exception("chat stream failed", extra={"request_id": request_id})
             if prefix_text:
                 for out in _prefix_failure_frames(
-                    prefix_text, streamed, structured, request_id
+                    prefix_text, streamed, structured, request_id, retrieval_sources
                 ):
                     yield out
             else:
