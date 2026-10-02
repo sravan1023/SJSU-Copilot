@@ -52,24 +52,19 @@ export interface TranscriptTerm {
   totals: TranscriptTotals | null;
 }
 
-export interface UnparsedLine {
-  page: number;
-  text: string;
-}
-
 export interface TranscriptRecord {
   parserVersion: string;
   terms: TranscriptTerm[];
   /** Cumulative total lines as printed (there may be several, e.g. per career). */
   cumulative: TranscriptTotals[];
-  unparsed: UnparsedLine[];
+  /** Lines that matched nothing. Counted only: their text is never kept. */
   unparsedCount: number;
+  unparsedByPage: Record<number, number>;
   /** Identity or pre-term header lines discarded, counted only. */
   droppedHeaderLines: number;
 }
 
 export interface ParseResult {
   record: TranscriptRecord;
-  unparsed: UnparsedLine[];
   parserVersion: string;
 }

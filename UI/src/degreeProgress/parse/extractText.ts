@@ -41,21 +41,26 @@ export function groupItems(page: number, raw: RawItem[]): TextLine[] {
   });
 }
 
-export async function extractLines(data: ArrayBuffer): Promise<TextLine[]> {
-  const pdfjs = await import("pdfjs-dist");
-  const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
-  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+/** Minimal surface of a pdf.js loading task, so cleanup is testable. */
+export interface LoadingTask {
+  promise: Promise<{
+    numPages: number;
+    getPage(n: number): Promise<{ getTextContent(): Promise<{ items: unknown[] }> }>;
+  }>;
+  destroy(): Promise<void>;
+}
 
-  const task = pdfjs.getDocument({ data: new Uint8Array(data) });
-  const doc = await task.promise;
+/** Read every page; the task (and its worker) is destroyed on every path. */
+export async function readPages(task: LoadingTask): Promise<TextLine[]> {
   const lines: TextLine[] = [];
   try {
+    const doc = await task.promise;
     for (let p = 1; p <= doc.numPages; p++) {
       const page = await doc.getPage(p);
       const content = await page.getTextContent();
       const raw: RawItem[] = [];
-      for (const it of content.items) {
-        if (!("str" in it)) continue;
+      for (const it of content.items as { str?: string; transform: number[]; width: number }[]) {
+        if (typeof it.str !== "string") continue;
         raw.push({ str: it.str, x: it.transform[4], y: it.transform[5], width: it.width });
       }
       lines.push(...groupItems(p, raw));
@@ -64,4 +69,11 @@ export async function extractLines(data: ArrayBuffer): Promise<TextLine[]> {
     await task.destroy();
   }
   return lines;
+}
+
+export async function extractLines(data: ArrayBuffer): Promise<TextLine[]> {
+  const pdfjs = await import("pdfjs-dist");
+  const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+  return readPages(pdfjs.getDocument({ data: new Uint8Array(data) }) as unknown as LoadingTask);
 }

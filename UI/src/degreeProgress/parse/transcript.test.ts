@@ -2,13 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parseTranscript, PARSER_VERSION } from "./transcript.ts";
-import { groupItems } from "./extractText.ts";
+import { groupItems, readPages, type LoadingTask } from "./extractText.ts";
 import type { TextLine } from "../types.ts";
 
 const lines: TextLine[] = JSON.parse(
   readFileSync(new URL("./__fixtures__/synthetic-transcript.json", import.meta.url), "utf8"),
 );
-const { record, unparsed, parserVersion } = parseTranscript(lines);
+const { record, parserVersion } = parseTranscript(lines);
 
 test("version is reported", () => {
   assert.equal(parserVersion, PARSER_VERSION);
@@ -53,10 +53,10 @@ test("totals are recorded as printed, never computed", () => {
   assert.deepEqual(record.cumulative, [{ ua: 12, ug: 9, ue: 12, gp: 33, gpa: 3.667 }]);
 });
 
-test("unmatched lines go to unparsed, with a count", () => {
-  assert.deepEqual(unparsed, [{ page: 1, text: "Page 1 of 2 footer thing" }]);
+test("unmatched lines are counted, never stored", () => {
   assert.equal(record.unparsedCount, 1);
-  assert.deepEqual(record.unparsed, unparsed);
+  assert.deepEqual(record.unparsedByPage, { 1: 1 });
+  assert.ok(!JSON.stringify(record).includes("footer thing"));
 });
 
 test("identity lines are dropped, not stored", () => {
@@ -66,7 +66,7 @@ test("identity lines are dropped, not stored", () => {
   }
   assert.equal(record.droppedHeaderLines, 4);
   assert.deepEqual(Object.keys(record).sort(), [
-    "cumulative", "droppedHeaderLines", "parserVersion", "terms", "unparsed", "unparsedCount",
+    "cumulative", "droppedHeaderLines", "parserVersion", "terms", "unparsedByPage", "unparsedCount",
   ]);
 });
 
@@ -99,4 +99,64 @@ test("groupItems: y tolerance, x order, word gaps from x", () => {
   assert.equal(out[0].text, "CS 157C 3.0");
   assert.deepEqual(out[0].items.map((i) => i.x), [10, 24, 200]);
   assert.equal(out[1].text, "Next");
+});
+
+const L = (text: string, page = 1): TextLine => ({ page, y: 0, items: [], text });
+
+test("identity text never reaches the record (page-2 headers, email, ID tail)", () => {
+  const r = parseTranscript([
+    L("FALL SEMESTER 2022 / MAJOR: MS Computer Science  Student ID: 012345678"),
+    L("CS 157C NoSQL Database Systems 3.0 3.0 3.0 A 12.0"),
+    L("Pat Q Fabricated", 2),
+    L("Unofficial Transcript for Pat Q Fabricated", 2),
+    L("Student: Pat Q Fabricated", 2),
+    L("pat.fabricated@example.invalid", 2),
+    L("Phone (408) 555-0100", 2),
+    L("SPRING SEMESTER 2023 / MAJOR: BS Art 987654321", 2),
+    L("Name: Pat Q Fabricated   EMPL ID 123456789", 2),
+  ]).record;
+  const blob = JSON.stringify(r);
+  for (const s of ["Pat", "Fabricated", "012345678", "987654321", "123456789", "example", "555", "Student"]) {
+    assert.ok(!blob.includes(s), `record leaks ${s}`);
+  }
+  assert.equal(r.terms[0].major, "MS Computer Science");
+  assert.equal(r.terms[1].major, "BS Art");
+  assert.equal(r.terms[0].courses.length, 1);
+  assert.equal(r.unparsedCount, 1); // the bare unlabelled name
+  assert.deepEqual(r.unparsedByPage, { 2: 1 });
+});
+
+test("major is dropped when it is not plain words", () => {
+  const r = parseTranscript([L("FALL 2022 / MAJOR: x7y")]).record;
+  assert.equal(r.terms[0].major, null);
+});
+
+test("readPages destroys the task when loading rejects", async () => {
+  let destroyed = 0;
+  const task: LoadingTask = {
+    promise: Promise.reject(new Error("PasswordException")),
+    destroy: async () => { destroyed++; },
+  };
+  await assert.rejects(readPages(task), /PasswordException/);
+  assert.equal(destroyed, 1);
+});
+
+test("readPages destroys the task on success and on page failure", async () => {
+  let destroyed = 0;
+  const ok: LoadingTask = {
+    promise: Promise.resolve({
+      numPages: 1,
+      getPage: async () => ({
+        getTextContent: async () => ({ items: [{ str: "Hi", transform: [1, 0, 0, 1, 10, 700], width: 5 }] }),
+      }),
+    }),
+    destroy: async () => { destroyed++; },
+  };
+  assert.equal((await readPages(ok))[0].text, "Hi");
+  const bad: LoadingTask = {
+    promise: Promise.resolve({ numPages: 1, getPage: async () => { throw new Error("x"); } }),
+    destroy: async () => { destroyed++; },
+  };
+  await assert.rejects(readPages(bad));
+  assert.equal(destroyed, 2);
 });
