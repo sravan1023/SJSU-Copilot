@@ -56,10 +56,12 @@ class FakeChild:
 def _state():
     admin_campus._child = None
     admin_campus._spawning = False
+    admin_campus._last_exit = None
     with patch.dict(os.environ, {"SUPABASE_SERVICE_KEY": "service-key-for-tests"}):
         yield
     admin_campus._child = None
     admin_campus._spawning = False
+    admin_campus._last_exit = None
 
 
 @pytest.fixture
@@ -226,3 +228,76 @@ def test_status_reports_a_running_child_and_503_on_database_failure(spawned):
             res = client.get("/api/admin/campus/status", headers=AUTH_HEADERS)
     assert res.status_code == 503 and "boom" not in res.text
     assert admin_campus._running() is True
+
+
+# -- the child's output and exit code -------------------------------------------------
+
+
+class _Popen:
+    """Records what _spawn handed to subprocess.Popen."""
+
+    def __init__(self, argv, **kw):
+        self.argv, self.kw, self.pid = argv, kw, 7
+        self.log_closed_during = kw["stdout"].closed
+
+
+@pytest.fixture
+def popen(tmp_path):
+    made = []
+
+    def factory(argv, **kw):
+        p = _Popen(argv, **kw)
+        made.append(p)
+        return p
+
+    with patch.object(admin_campus, "LOG_PATH", tmp_path / "logs" / "campus-refresh.log"),             patch.object(admin_campus.subprocess, "Popen", factory):
+        yield made
+
+
+def test_spawn_sends_stdout_and_stderr_to_an_appended_log_and_closes_the_handle(popen):
+    log_path = admin_campus.LOG_PATH
+    argv = [sys.executable, "-m", "campus.registration.refresh", "--source", "registrar"]
+    admin_campus._spawn(argv, "cwd")
+    admin_campus._spawn(argv, "cwd")
+    first, second = popen
+    handle = first.kw["stdout"]
+    assert handle.name == str(log_path) and "a" in handle.mode  # append
+    assert first.kw["stderr"] is admin_campus.subprocess.STDOUT  # same stream, same file
+    assert first.log_closed_during is False and handle.closed is True  # parent let go
+    text = log_path.read_text(encoding="utf-8")
+    assert text.count("=== ") == 2  # appended, not truncated
+    assert "--source registrar" in text and "+00:00" in text  # timestamp and argv header
+
+
+def test_create_no_window_only_on_windows(popen):
+    with patch.object(admin_campus.sys, "platform", "win32"):
+        admin_campus._spawn(["x"], "cwd")
+    with patch.object(admin_campus.sys, "platform", "linux"):
+        admin_campus._spawn(["x"], "cwd")
+    win, other = popen
+    assert win.kw["creationflags"] == admin_campus.subprocess.CREATE_NO_WINDOW
+    assert "creationflags" not in other.kw
+
+
+@pytest.mark.parametrize("code,meaning", [
+    (0, "ok"), (1, "failed or partial"), (2, "bad arguments or not configured"),
+    (3, "busy (another refresh holds the lock)"), (9, "unexpected exit code"),
+])
+def test_exit_code_meaning_is_logged_and_in_status(code, meaning, spawned, caplog):
+    with _grants(_granted):
+        client.post("/api/admin/campus/refresh", headers=AUTH_HEADERS)
+        admin_campus._child.code = code
+        with caplog.at_level("INFO", logger=admin_campus.logger.name),                 respx.mock(assert_all_called=False) as mock:
+            mock.route(url__startswith=REST).mock(return_value=httpx.Response(200, json=[]))
+            body = client.get("/api/admin/campus/status", headers=AUTH_HEADERS).json()
+    assert body["refresh_running"] is False
+    assert (body["last_exit_code"], body["last_exit_meaning"]) == (code, meaning)
+    rec = next(r for r in caplog.records if r.getMessage() == "campus refresh exited")
+    assert (rec.exit_code, rec.meaning) == (code, meaning)
+
+
+def test_status_has_no_exit_code_before_any_child_has_finished(spawned):
+    with _grants(_granted), respx.mock(assert_all_called=False) as mock:
+        mock.route(url__startswith=REST).mock(return_value=httpx.Response(200, json=[]))
+        body = client.get("/api/admin/campus/status", headers=AUTH_HEADERS).json()
+    assert body["last_exit_code"] is None and body["last_exit_meaning"] is None

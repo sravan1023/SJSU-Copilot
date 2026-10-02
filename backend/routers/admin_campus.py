@@ -13,12 +13,16 @@ CLI's own database guard (`campus_refresh_runs`, exit code 3 = busy) covers a
 second backend worker or a cron run. Neither is the other's substitute.
 
 Argv is built from validated values only: `--source` from a fixed enum and
-`--term` from `TERM_KEY_RE`. The child's output is discarded, not piped (an
-unread pipe would fill and block it); the outcome is in `campus_refresh_runs`.
+`--term` from `TERM_KEY_RE`. The child's output goes to `logs/campus-refresh.log`
+(append), not to a pipe (an unread pipe would fill and block it) and not to
+DEVNULL: a child that dies before it records a `campus_refresh_runs` row (not
+configured, a StoreError, busy, an import error) would otherwise leave no trace
+anywhere. Once it has started, the outcome is also in `campus_refresh_runs`.
 """
 import logging
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -29,18 +33,29 @@ import observability
 import runtime
 from auth import require_capability
 from campus import terms
+from routers.trace import trace_request
 from services import registration
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["campus"])
+router = APIRouter(tags=["campus"], dependencies=[Depends(trace_request)])
 
 RUN_INGESTION = Depends(require_capability("run_ingestion"))
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 RECENT_RUNS = 10
+LOG_PATH = BACKEND_DIR / "logs" / "campus-refresh.log"  # gitignored via `logs`
+
+# The refresh CLI's exit codes (campus/registration/refresh.py).
+EXIT_MEANINGS = {
+    0: "ok",
+    1: "failed or partial",
+    2: "bad arguments or not configured",
+    3: "busy (another refresh holds the lock)",
+}
 
 _child = None  # the live Popen, or None
 _spawning = False  # set before the await so two POSTs can't both pass the check
+_last_exit: int | None = None  # exit code of the last reaped child
 
 
 class RefreshRequest(BaseModel):
@@ -67,19 +82,42 @@ def build_argv(source: str | None, term: str | None) -> list[str]:
     return argv
 
 
+def exit_meaning(code: int | None) -> str | None:
+    if code is None:
+        return None
+    if code < 0:
+        return f"killed by signal {-code}"
+    return EXIT_MEANINGS.get(code, "unexpected exit code")
+
+
+def _popen_flags() -> dict:
+    # Without this a console window flashes on the operator's desktop on Windows.
+    if sys.platform == "win32":
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
+
+
 def _spawn(argv: list[str], cwd: str):
-    return subprocess.Popen(
-        argv,
-        cwd=cwd,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(LOG_PATH, "ab") as log:
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        log.write(f"\n=== {stamp} {' '.join(argv)}\n".encode("utf-8"))
+        log.flush()
+        # The child inherits its own duplicate of the handle, so closing ours
+        # right after Popen is safe and leaves the parent with no open file.
+        return subprocess.Popen(
+            argv,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            **_popen_flags(),
+        )
 
 
 def _running() -> bool:
     """Whether the last child is alive. Polling also reaps it and logs its exit."""
-    global _child
+    global _child, _last_exit
     if _child is None:
         return False
     code = _child.poll()
@@ -88,8 +126,9 @@ def _running() -> bool:
     logger.info(
         "campus refresh exited",
         extra={"request_id": observability.current_request_id(), "exit_code": code,
-               "busy": code == 3},
+               "meaning": exit_meaning(code), "busy": code == 3},
     )
+    _last_exit = code
     _child = None
     return False
 
@@ -150,6 +189,8 @@ async def campus_status():
 
     return {
         "refresh_running": _spawning or _running(),
+        "last_exit_code": _last_exit,
+        "last_exit_meaning": exit_meaning(_last_exit),
         "runs": runs,
         "current": [
             {
