@@ -259,19 +259,71 @@ def test_stale_after_48_hours():
     assert asyncio.run(go(NOW - timedelta(hours=49))) is True
 
 
-def test_pointer_reads_are_cached():
+def test_pointer_and_event_reads_are_cached():
     fake = Fake()
     with _mock(fake):
         for _ in range(3):
             assert client.get("/api/registration/deadlines?term=fall-2026", headers=GUEST_HEADERS).status_code == 200
-    # Pointer and snapshot for registrar and for academic are read once; events are not cached.
+    # Pointers and snapshots for registrar and academic, and each snapshot's
+    # event rows, are read once; the second and third requests touch nothing.
     assert fake.count("campus_current") == 2
     assert fake.count("campus_snapshots") == 2
-    assert fake.count("reg_term_events") == 6
+    assert fake.count("reg_term_events") == 2
     registration.clear_cache()
     with _mock(fake):
         client.get("/api/registration/deadlines?term=fall-2026", headers=GUEST_HEADERS)
     assert fake.count("campus_current") == 4
+    assert fake.count("reg_term_events") == 4
+
+
+def test_event_cache_is_bounded_and_empty_results_are_not_cached():
+    async def go():
+        fake = Fake(rows={})
+        with _mock(fake):
+            assert await registration._snapshot_rows("nope") == []
+            assert await registration._snapshot_rows("nope") == []
+        assert fake.count("reg_term_events") == 2  # an empty answer is asked again
+        big = Fake(rows={f"s{i}": [_event("x", "d", "2026-09-01", None, "k")]
+                         for i in range(registration.EVENT_CACHE_SIZE + 5)})
+        with _mock(big):
+            for i in range(registration.EVENT_CACHE_SIZE + 5):
+                await registration._snapshot_rows(f"s{i}")
+        assert len(registration._rows_cache) == registration.EVENT_CACHE_SIZE
+        assert "s0" not in registration._rows_cache  # least recently used went first
+
+    asyncio.run(go())
+
+
+def test_a_pruned_snapshot_behind_a_cached_pointer_is_re_read_once():
+    SNAP_NEW = "33333333-3333-4333-8333-333333333333"
+    new_rows = [_event("Brand new deadline", "Fri, Nov 6", "2026-11-06", None, "k1")]
+    fake = Fake()
+    with _mock(fake):
+        assert client.get("/api/registration/deadlines?term=fall-2026", headers=GUEST_HEADERS).json()["status"] == "ok"
+        # Two refreshes inside the pointer TTL: the old snapshot is pruned (its
+        # rows are gone), the pointer now names a new one, and the rows cache
+        # has lost the old entry.
+        registration._rows_cache.clear()
+        fake.pointers[("registrar", "fall-2026")] = SNAP_NEW
+        fake.rows = {SNAP_NEW: new_rows, SNAP_AY: AY_ROWS}
+        before = fake.count("campus_current")
+        body = client.get("/api/registration/deadlines?term=fall-2026", headers=GUEST_HEADERS).json()
+    assert body["status"] == "ok"
+    assert "Brand new deadline" in [e["label_raw"] for e in body["events"]]
+    # Exactly one pointer re-read: the stale one was dropped, not retried forever.
+    assert fake.count("campus_current") - before == 1
+    assert body["snapshot"]["source_url"].endswith(f"{SNAP_NEW[:4]}.php")
+
+
+def test_a_snapshot_that_stays_empty_is_not_loaded_never_an_empty_ok():
+    fake = Fake(rows={SNAP_FALL: [], SNAP_AY: AY_ROWS})
+    with _mock(fake):
+        body = client.get("/api/registration/deadlines?term=fall-2026", headers=GUEST_HEADERS).json()
+        again = client.get("/api/registration/deadlines?term=fall-2026", headers=GUEST_HEADERS).json()
+    for b in (body, again):
+        assert b["status"] == "not_loaded" and b["events"] == [] and b["snapshot"] is None
+    # First call: pointer read fresh, so no retry (1 read). Second: it came from the cache, so one re-read (2).
+    assert fake.count("campus_current") == 2
 
 
 def test_omitted_term_resolves_this_semester():
@@ -343,3 +395,81 @@ def test_registration_scope_is_isolated_from_chat():
     assert codes[0] == 200 and 429 in codes
     # Every bucket it spent is under the "reg:" prefix, so chat's keys are untouched.
     assert ratelimit._buckets and all(k.startswith("reg:") for k in ratelimit._buckets)
+
+
+def test_explicit_term_parameter_does_not_claim_a_question_named_it():
+    with _mock(Fake()):
+        body = client.get("/api/registration/deadlines?term=spring-2027", headers=GUEST_HEADERS).json()
+    assert body["how"] == "Showing Spring 2027."
+    # The phrase path chat uses keeps its wording.
+    assert registration.resolve_term("spring 2027", TODAY).how == "Spring 2027 was named in the question"
+
+
+# -- observability -----------------------------------------------------------------
+
+
+@pytest.fixture
+def timings(caplog):
+    caplog.set_level("INFO")
+
+    def lines():
+        return [r for r in caplog.records if r.name == "timings" and r.getMessage() == "request timings"]
+
+    return lines
+
+
+def test_deadlines_emits_one_timings_line_with_the_query_stage_and_a_label(timings):
+    with _mock(Fake()):
+        res = client.get("/api/registration/deadlines?term=fall-2026", headers={**GUEST_HEADERS, "x-request-id": "abc123"})
+    assert res.status_code == 200
+    (line,) = timings()
+    assert line.request_id == "abc123"
+    assert set(vars(line)) >= {"request_id", "total_ms", "stages", "marks", "counters", "outcome"}
+    assert "reg.query" in line.stages and "auth_verify" in line.stages
+    assert line.counters["reg_term_resolution"] == "explicit"
+    assert line.outcome == "ok" and line.route.endswith("/registration/deadlines")
+    assert "reg_snapshot_age_h" in line.counters
+
+
+@pytest.mark.parametrize("path,label", [("/api/registration/deadlines", "this"), ("/api/registration/terms", "this")])
+def test_resolution_label_is_from_the_fixed_set(path, label, timings):
+    with _mock(Fake()):
+        client.get(path, headers=GUEST_HEADERS)
+    assert timings()[0].counters["reg_term_resolution"] == label
+
+
+def test_between_terms_label():
+    assert registration.resolve_term("this semester", date(2026, 8, 14)).kind == "between"
+    assert registration.resolve_term("next semester", TODAY).kind == "next"
+    assert registration.resolve_term("hello there", TODAY).kind == "unresolved"
+
+
+def test_a_503_warning_carries_the_request_id_and_the_line_says_error(timings, caplog):
+    with respx.mock(assert_all_called=False) as mock:
+        mock.route(url__startswith=REST).mock(return_value=httpx.Response(500, text="boom"))
+        res = client.get("/api/registration/deadlines?term=fall-2026",
+                         headers={**AUTH_HEADERS, "x-request-id": "req-503"})
+    assert res.status_code == 503
+    warn = next(r for r in caplog.records if r.getMessage() == "registration unavailable")
+    assert warn.request_id == "req-503"
+    assert timings()[0].outcome == "error" and timings()[0].request_id == "req-503"
+
+
+def test_no_user_phrase_reaches_the_trace(timings):
+    phrase = "when is the zebra-banana deadline"
+    async def go():
+        with _mock(Fake()):
+            observability_trace = registration.observability.begin("t1")
+            res = registration.resolve_term(phrase, TODAY)
+            registration.observability.record("reg_term_resolution", res.kind)
+            return registration.observability.flush(observability_trace)
+
+    res = registration.resolve_term(phrase, TODAY)
+    assert res.term is None and "zebra" in res.how  # the how does hold the text...
+    payload = asyncio.run(go())
+    assert payload["counters"]["reg_term_resolution"] == "unresolved"
+    assert "zebra" not in repr(payload)  # ...and the trace does not
+    # Through the routes too: a hostile-looking term is rejected, and nothing it said is logged.
+    with _mock(Fake()):
+        client.get("/api/registration/deadlines?term=zebra-banana", headers=GUEST_HEADERS)
+    assert all("zebra" not in repr(vars(r)) for r in timings())

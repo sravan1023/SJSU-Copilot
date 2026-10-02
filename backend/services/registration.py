@@ -5,10 +5,18 @@ the shared Supabase client with the service key (no table is granted to anon).
 Readers resolve through `campus_current`, never by snapshot `status`, which can
 lag the pointer after a crash.
 
-**Why a pointer cache is safe.** A refresh prunes only snapshots older than 24 h
-that no pointer names, so a pointer cached for 5 minutes cannot name a deleted
-snapshot. A flip is seen after at most 5 minutes, which is fine for a page that
-changes a few times a term.
+**Caches.** A pointer is cached for 5 minutes, so a flip is seen after at most
+5 minutes, which is fine for a page that changes a few times a term. A
+snapshot's event rows are cached by `snapshot_id` (LRU, `EVENT_CACHE_SIZE`):
+the refresh writes a new snapshot instead of editing one, so a snapshot's rows
+never change.
+
+**A cached pointer can name a pruned snapshot.** A refresh prunes snapshots
+older than 24 h that no pointer names, and two refreshes inside the 5-minute
+TTL can leave a cached pointer naming a snapshot that is already gone. That
+shows up as 0 event rows. `_pointer_rows` then drops the pointer entry, reads
+the pointer once more and retries, so a stale pointer never becomes an "ok"
+answer with no deadlines.
 
 **Pacific time.** "Today" is the calendar date in America/Los_Angeles. At 23:30
 Pacific the UTC date is already tomorrow, and a deadline that is "today" would
@@ -20,6 +28,7 @@ import logging
 import os
 import re
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -36,6 +45,7 @@ PACIFIC = ZoneInfo("America/Los_Angeles")
 POINTER_TTL_S = 300.0
 NEGATIVE_TTL_S = 60.0  # a term the refresh has just loaded should appear soon
 STALE_AFTER = timedelta(hours=48)
+EVENT_CACHE_SIZE = 32  # snapshots; ~30-60 small rows each, so a few hundred KB at most
 EVENT_LIMIT = 1000  # a term calendar is ~30 cells; this is a ceiling, not a page size
 # Academic-calendar rows are kept if they overlap the term's nominal window
 # widened by this much at each end (see term_events).
@@ -70,6 +80,9 @@ def pacific_today(now: datetime | None = None) -> date:
 class Resolution:
     term: str | None
     how: str
+    # Fixed vocabulary for traces: explicit | this | between | next | unresolved.
+    # `how` can contain the user's own words, so it must never be recorded.
+    kind: str = "unresolved"
 
 
 def term_label(term_key: str) -> str:
@@ -87,7 +100,12 @@ def _regular_terms_around(today: date) -> list[str]:
     ]
 
 
-def _this_term(today: date) -> tuple[str, str]:
+def explicit_term(key: str) -> Resolution:
+    """A term the caller chose directly (the page's selector): no question exists."""
+    return Resolution(key, f"Showing {term_label(key)}.", "explicit")
+
+
+def _this_term(today: date) -> tuple[str, str, str]:
     """The regular term containing `today`, else the next to start, with the reason."""
     # The explanation names the term and never prints term_window's dates: those
     # are nominal sizing values (Fall: Aug 20 - Dec 15), not SJSU's calendar
@@ -98,14 +116,14 @@ def _this_term(today: date) -> tuple[str, str]:
     for key in candidates:
         start, end = terms.term_window(key)
         if start <= today <= end:
-            return key, f"{when} falls in the {term_label(key)} term"
+            return key, f"{when} falls in the {term_label(key)} term", "this"
     for key in candidates:
         start, _ = terms.term_window(key)
         if start > today:
             return key, (
                 f"{when} falls between terms, so this is the next term to start: "
                 f"{term_label(key)}"
-            )
+            ), "between"
     raise ValueError("no term found")  # unreachable: three years of candidates
 
 
@@ -130,12 +148,16 @@ def _explicit(phrase: str, today: date) -> Resolution | None:
         key = f"{season}-{yr}"
         if not terms.is_term_key(key):
             return None
-        return Resolution(key, f"{term_label(key)} was named in the question")
+        return Resolution(key, f"{term_label(key)} was named in the question", "explicit")
     # A season without a year: the first one not yet over.
     for y in (today.year - 1, today.year, today.year + 1, today.year + 2):
         key = f"{season}-{y}"
         if terms.term_window(key)[1] >= today:
-            return Resolution(key, f"{season.capitalize()} was named without a year, so the next one: {term_label(key)}")
+            return Resolution(
+                key,
+                f"{season.capitalize()} was named without a year, so the next one: {term_label(key)}",
+                "explicit",
+            )
     return None
 
 
@@ -149,17 +171,18 @@ def resolve_term(phrase: str | None, today: date) -> Resolution:
     text = (phrase or "").strip()
     if terms.is_term_key(text.lower()):
         key = text.lower()
-        return Resolution(key, f"{term_label(key)} was named in the question")
+        return Resolution(key, f"{term_label(key)} was named in the question", "explicit")
     explicit = _explicit(text, today) if text else None
     if explicit:
         return explicit
-    this, why = _this_term(today)
+    this, why, this_kind = _this_term(today)
     if _NEXT_RE.search(text):
         nxt = _semester_after(this)
-        return Resolution(nxt, f"'next semester' follows {term_label(this)}: {why}")
+        return Resolution(nxt, f"'next semester' follows {term_label(this)}: {why}", "next")
     if not text or _THIS_RE.search(text) or re.search(r"semester|term|quarter", text, re.I):
-        return Resolution(this, why)
-    return Resolution(None, f"could not tell which term {text[:40]!r} means")
+        return Resolution(this, why, this_kind)
+    # `how` is shown to the caller only; it is never recorded (see Resolution.kind).
+    return Resolution(None, f"could not tell which term {text[:40]!r} means", "unresolved")
 
 
 # -- Supabase reads -------------------------------------------------------------
@@ -201,8 +224,59 @@ async def get_rows(path: str, params: dict) -> list[dict]:
 _cache: dict[tuple[str, str], tuple[float, object]] = {}
 
 
+# snapshot_id -> that snapshot's event rows, least recently used first.
+_rows_cache: OrderedDict[str, list[dict]] = OrderedDict()
+
+
 def clear_cache() -> None:
     _cache.clear()
+    _rows_cache.clear()
+
+
+async def _snapshot_rows(snapshot_id: str) -> list[dict]:
+    """Event rows of one snapshot. Cached only when non-empty, so a pruned or
+    half-written snapshot is asked about again rather than remembered as empty."""
+    hit = _rows_cache.get(snapshot_id)
+    if hit is not None:
+        _rows_cache.move_to_end(snapshot_id)
+        observability.incr("reg_rows_cache_hit")
+        return hit
+    rows = await get_rows(
+        "reg_term_events",
+        {
+            "select": "category,label_raw,date_raw,start_date,end_date,event_key",
+            "snapshot_id": f"eq.{snapshot_id}",
+            "order": "start_date.asc.nullslast",
+            "limit": str(EVENT_LIMIT),
+        },
+    )
+    if rows:
+        _rows_cache[snapshot_id] = rows
+        while len(_rows_cache) > EVENT_CACHE_SIZE:
+            _rows_cache.popitem(last=False)
+    return rows
+
+
+async def _pointer_rows(source: str, scope: str) -> tuple[dict, dict, list[dict]] | None:
+    """(pointer, snapshot row, event rows), retrying once past a stale pointer.
+
+    Zero rows from a pointer that came out of the cache means its snapshot may
+    have been pruned since. Drop the entry (and the term list, which was built
+    from the same pointers), re-read, and try again. Zero rows from a pointer
+    read just now are returned as they are.
+    """
+    for attempt in (0, 1):
+        cached = (hit := _cache.get((source, scope))) is not None and hit[0] > time.monotonic()
+        found = await _pointer(source, scope)
+        if found is None:
+            return None
+        rows = await _snapshot_rows(found[0]["snapshot_id"])
+        if rows or attempt == 1 or not cached:
+            return found[0], found[1], rows
+        observability.incr("reg_stale_pointer_retry")
+        _cache.pop((source, scope), None)
+        _cache.pop(("registrar", "*"), None)
+    return None  # unreachable
 
 
 def _cache_get(key: tuple[str, str]):
@@ -320,7 +394,7 @@ async def list_terms(today: date | None = None, now: datetime | None = None) -> 
     names = {t for t, _, _ in loaded}
     this = resolve_term("this semester", today)
     nxt = resolve_term("next semester", today)
-    observability.record("reg_term_resolution", this.how)
+    observability.record("reg_term_resolution", this.kind)
     return {
         "today": today.isoformat(),
         "terms": sorted(
@@ -391,20 +465,13 @@ async def term_events(
     out: dict = {"term": term, "label": term_label(term), "status": "not_loaded",
                  "snapshot": None, "academic_snapshot": None, "events": []}
     with observability.stage("reg.query"):
-        reg = await _pointer("registrar", term)
-        if reg is None:
+        reg = await _pointer_rows("registrar", term)
+        # No registrar events is "not loaded", never an empty "ok": a snapshot
+        # with nothing in it has nothing to show, and the page says so.
+        if reg is None or not reg[2]:
             return out
-        pointer, snap = reg
-        rows = await get_rows(
-            "reg_term_events",
-            {
-                "select": "category,label_raw,date_raw,start_date,end_date,event_key",
-                "snapshot_id": f"eq.{pointer['snapshot_id']}",
-                "order": "start_date.asc.nullslast",
-                "limit": str(EVENT_LIMIT),
-            },
-        )
-        academic = await _pointer("academic", _ay_for_term(term))
+        pointer, snap, rows = reg
+        academic = await _pointer_rows("academic", _ay_for_term(term))
         academic_rows: list[dict] = []
         if academic is not None:
             # The nominal window is an approximation and SJSU's real term runs
@@ -414,19 +481,7 @@ async def term_events(
             start, end = terms.term_window(term)
             margin = timedelta(days=ACADEMIC_WINDOW_MARGIN_DAYS)
             window = (start - margin, end + margin)
-            academic_rows = [
-                r
-                for r in await get_rows(
-                    "reg_term_events",
-                    {
-                        "select": "category,label_raw,date_raw,start_date,end_date,event_key",
-                        "snapshot_id": f"eq.{academic[0]['snapshot_id']}",
-                        "order": "start_date.asc.nullslast",
-                        "limit": str(EVENT_LIMIT),
-                    },
-                )
-                if _in_window(r, window)
-            ]
+            academic_rows = [r for r in academic[2] if _in_window(r, window)]
     out["status"] = "ok"
     out["snapshot"] = _snapshot_block(term, pointer, snap, now)
     if academic is not None:

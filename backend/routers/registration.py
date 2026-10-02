@@ -11,10 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 import observability
 from campus import terms
 from ratelimit import rate_limited_scope
+from routers.trace import trace_request
 from services import registration
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["registration"])
+# The trace dependency is listed first so it runs before auth and the rate
+# limiter: their warnings then carry the request id.
+router = APIRouter(tags=["registration"], dependencies=[Depends(trace_request)])
 
 _reg_limited = Depends(rate_limited_scope("reg"))
 
@@ -52,8 +55,9 @@ async def get_deadlines(term: str | None = Query(default=None, max_length=32)):
     else:
         if not terms.TERM_KEY_RE.match(term):
             raise HTTPException(status_code=422, detail="term must look like fall-2026")
-        resolved = registration.resolve_term(term, today)
-    observability.record("reg_term_resolution", resolved.how)
+        # The page's selector chose this term; no question exists to have "named" it.
+        resolved = registration.explicit_term(term)
+    observability.record("reg_term_resolution", resolved.kind)
     try:
         body = await registration.term_events(resolved.term, today=today)
     except registration.RegistrationUnavailable as exc:
