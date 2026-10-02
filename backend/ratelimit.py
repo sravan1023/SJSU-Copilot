@@ -225,6 +225,72 @@ def rate_limited(
     return principal
 
 
+# ── Scoped buckets ────────────────────────────────────────────────────────────
+
+# scope -> (user per-min, user burst, guest per-min, guest burst). Registration
+# browsing is cheap DB reads, not provider tokens, so it can afford more than
+# chat; it is still bounded because the endpoints sit behind a shared pool.
+_SCOPE_DEFAULTS = {"reg": (60.0, 20.0, 30.0, 10.0)}
+
+
+def scope_limit_for(scope: str, kind: str) -> Limit:
+    """The principal bucket for `scope`, from `<SCOPE>_RATE_*` variables."""
+    prefix = scope.upper()
+    if scope not in _SCOPE_DEFAULTS:
+        return limit_for(kind)
+    u_rate, u_burst, g_rate, g_burst = _SCOPE_DEFAULTS[scope]
+    if kind == "guest":
+        return Limit(
+            _num(f"{prefix}_RATE_GUEST_PER_MIN", g_rate), _num(f"{prefix}_RATE_GUEST_BURST", g_burst)
+        )
+    return Limit(
+        _num(f"{prefix}_RATE_USER_PER_MIN", u_rate), _num(f"{prefix}_RATE_USER_BURST", u_burst)
+    )
+
+
+def scope_ip_limit(scope: str) -> Limit:
+    if scope not in _SCOPE_DEFAULTS:
+        return ip_limit()
+    prefix = scope.upper()
+    return Limit(_num(f"{prefix}_IP_RATE_PER_MIN", 120), _num(f"{prefix}_IP_RATE_BURST", 40))
+
+
+def rate_limited_scope(scope: str):
+    """Dependency factory: `rate_limited` with its own buckets under `scope`.
+
+    Every key is prefixed with the scope, for the principal AND the address, so
+    a user paging through class listings can neither spend their chat budget nor
+    push their address's chat bucket into a 429 (decision 8). `rate_limited`
+    itself is untouched; chat keeps its unprefixed keys.
+    """
+
+    def dependency(
+        request: Request,
+        principal: Principal = Depends(require_principal),
+    ) -> Principal:
+        if not _enabled():
+            return principal
+
+        wait = _take(f"{scope}:ip:{client_ip(request)}", scope_ip_limit(scope))
+        if wait:
+            logger.warning(
+                "rate limited by ip",
+                extra={"scope": scope, "kind": principal.kind, "retry_after": round(wait, 1)},
+            )
+            raise _too_many(wait)
+
+        wait = _take(f"{scope}:{principal.rate_key}", scope_limit_for(scope, principal.kind))
+        if wait:
+            logger.warning(
+                "rate limited",
+                extra={"scope": scope, "kind": principal.kind, "retry_after": round(wait, 1)},
+            )
+            raise _too_many(wait)
+        return principal
+
+    return dependency
+
+
 # ── Concurrency ───────────────────────────────────────────────────────────────
 
 
