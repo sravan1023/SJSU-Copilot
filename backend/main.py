@@ -12,7 +12,7 @@ from logging_config import setup_logging
 setup_logging()
 
 from runtime import lifespan
-from routers import chat, professors, jobs, telemetry, guest, admin_kb, registration
+from routers import chat, professors, jobs, telemetry, guest, admin_kb, registration, admin_campus
 
 app = FastAPI(title="SJSU Copilot API", lifespan=lifespan)
 
@@ -41,6 +41,7 @@ app.include_router(telemetry.router, prefix="/api")
 app.include_router(guest.router, prefix="/api")
 app.include_router(admin_kb.router, prefix="/api")
 app.include_router(registration.router, prefix="/api")
+app.include_router(admin_campus.router, prefix="/api")
 
 
 @app.get("/")
