@@ -12,8 +12,9 @@
  *                               (20260917000200_profiles_privilege_guard.sql)
  *   user_affiliations           INSERT (user_id, affiliation, source) only --
  *                               `status` is NOT grantable, by design
- *   profile_audience_details    full CRUD, RLS-scoped to the owner
- *                               (20260917000100_audience_model.sql)
+ *   profile_audience_details    full CRUD, RLS-scoped to the owner, 8 KB cap
+ *                               on `details` (20260917000100_audience_model.sql);
+ *                               writes merge, see saveAudienceDetails
  */
 import { supabase } from '../supabaseClient';
 
@@ -94,8 +95,24 @@ export async function declareAffiliation(userId, affiliation, source = 'onboardi
   if (error && error.code !== '23505') throw error;
 }
 
-/** Store the audience-specific fields that have no `profiles` column. */
-export async function saveAudienceDetails(userId, audience, details) {
+/**
+ * Merge audience-specific fields into the stored blob for one audience.
+ *
+ * Keys in `patch` replace the stored ones; a key whose value is null,
+ * undefined or '' is removed; keys the caller doesn't name are kept. Two
+ * writers share the student blob -- the Settings form (its no-column fields)
+ * and the Degree Progress page (`degree_progress`) -- and a whole-blob upsert
+ * from either would wipe the other's data.
+ *
+ * Read-then-write, so two tabs saving at the same instant can lose one write.
+ * It is one person's own row; that is acceptable.
+ */
+export async function saveAudienceDetails(userId, audience, patch) {
+  const details = { ...(await fetchAudienceDetails(userId, audience)) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null || value === undefined || value === '') delete details[key];
+    else details[key] = value;
+  }
   const { error } = await supabase
     .from('profile_audience_details')
     .upsert(
@@ -115,6 +132,20 @@ export async function fetchAudienceDetails(userId, audience) {
     .maybeSingle();
   if (error) throw error;
   return data?.details ?? {};
+}
+
+/**
+ * The student's self-reported degree progress as stored, or null. Raw: the
+ * caller runs it through selfReport.sanitizeReport before trusting it.
+ */
+export async function fetchDegreeProgress(userId) {
+  const details = await fetchAudienceDetails(userId, 'student');
+  return details.degree_progress ?? null;
+}
+
+/** Store the report, or remove it with null. Other student fields are kept. */
+export async function saveDegreeProgress(userId, report) {
+  await saveAudienceDetails(userId, 'student', { degree_progress: report });
 }
 
 /**

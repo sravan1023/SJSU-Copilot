@@ -188,8 +188,10 @@ export default function UserProfile({ onBack, user, audience, onProfileChange, b
       if (field.column) {
         const convert = CONVERTERS[field.column]?.toDb;
         patch[field.column] = convert ? convert(value) : (value || null);
-      } else if (value !== undefined && value !== '') {
-        details[field.name] = value;
+      } else {
+        // saveAudienceDetails merges: a cleared field is sent as null so it is
+        // removed, and keys this form doesn't own (degree_progress) are kept.
+        details[field.name] = value === undefined || value === '' ? null : value;
       }
     }
 
