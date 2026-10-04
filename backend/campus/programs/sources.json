@@ -1,0 +1,139 @@
+{
+  "$comment": [
+    "Department pages that list a degree program's courses, read by campus/programs/build.py. Hand-curated: each URL was opened and its output checked before it was added.",
+    "Only www.sjsu.edu (campus.terms.ALLOWED_HOSTS). The catalog is behind a WAF and is never a source.",
+    "mode 'titled' reads 'SUBJ NUM - Title' lines; 'codes' reads shorthand like 'MATH 30, 31, 32' and is only for pages whose shorthand IS the program list. groups: keep the page's section headings. stop_at: stop reading at the first heading that starts with this text.",
+    "own_subjects orders the program's own courses first in the UI.",
+    "Pilot: College of Engineering, 2026-10-01. Not covered yet: Mechanical (its lists are Google Sheets), Chemical and Materials (roadmap PDFs only), Civil (4-year plan page is a 404), Aviation, Engineering Technology, Interdisciplinary (not yet surveyed).",
+    "aliases: what a student might type as their Major in Settings; the Degree Progress page matches the profile's major against name and aliases (case, punctuation and a 'BS'/'B.S.'/'Bachelor of Science in' prefix ignored). Keep them unambiguous: never a name another program could also mean."
+  ],
+  "programs": [
+    {
+      "id": "bsae",
+      "name": "BS Aerospace Engineering",
+      "aliases": [
+        "Aerospace Engineering",
+        "Aerospace",
+        "AE",
+        "BSAE"
+      ],
+      "department": "Aerospace Engineering",
+      "college": "Engineering",
+      "own_subjects": [
+        "AE"
+      ],
+      "sources": [
+        {
+          "url": "https://www.sjsu.edu/ae/programs/bsae/prerequisite.php",
+          "mode": "titled"
+        }
+      ]
+    },
+    {
+      "id": "bsbme",
+      "name": "BS Biomedical Engineering",
+      "aliases": [
+        "Biomedical Engineering",
+        "Biomedical",
+        "BME",
+        "BSBME"
+      ],
+      "department": "Biomedical Engineering",
+      "college": "Engineering",
+      "own_subjects": [
+        "BME"
+      ],
+      "sources": [
+        {
+          "url": "https://www.sjsu.edu/bme/programs/bs-bme/curriculum.php",
+          "mode": "titled",
+          "groups": true
+        }
+      ]
+    },
+    {
+      "id": "bscmpe",
+      "name": "BS Computer Engineering",
+      "aliases": [
+        "Computer Engineering",
+        "CMPE",
+        "CompE",
+        "BSCMPE"
+      ],
+      "department": "Computer Engineering",
+      "college": "Engineering",
+      "own_subjects": [
+        "CMPE"
+      ],
+      "sources": [
+        {
+          "url": "https://www.sjsu.edu/cmpe/undergraduate_programs/undergraduate_courses.php",
+          "mode": "titled"
+        }
+      ]
+    },
+    {
+      "id": "bsse",
+      "name": "BS Software Engineering",
+      "aliases": [
+        "Software Engineering",
+        "BSSE"
+      ],
+      "department": "Computer Engineering",
+      "college": "Engineering",
+      "own_subjects": [
+        "CMPE"
+      ],
+      "sources": [
+        {
+          "url": "https://www.sjsu.edu/cmpe/undergraduate_programs/undergraduate_courses.php",
+          "mode": "titled"
+        }
+      ]
+    },
+    {
+      "id": "bsee",
+      "name": "BS Electrical Engineering",
+      "aliases": [
+        "Electrical Engineering",
+        "EE",
+        "BSEE"
+      ],
+      "department": "Electrical Engineering",
+      "college": "Engineering",
+      "own_subjects": [
+        "EE"
+      ],
+      "sources": [
+        {
+          "url": "https://www.sjsu.edu/ee/undergraduate-program/syllabi.php",
+          "mode": "titled",
+          "groups": true
+        }
+      ]
+    },
+    {
+      "id": "bsise",
+      "name": "BS Industrial and Systems Engineering",
+      "aliases": [
+        "Industrial and Systems Engineering",
+        "Industrial & Systems Engineering",
+        "Industrial Engineering",
+        "ISE",
+        "BSISE"
+      ],
+      "department": "Industrial and Systems Engineering",
+      "college": "Engineering",
+      "own_subjects": [
+        "ISE"
+      ],
+      "sources": [
+        {
+          "url": "https://www.sjsu.edu/ise/programs/bs-ise/program-requirements.php",
+          "mode": "codes",
+          "stop_at": "Additional Requirements"
+        }
+      ]
+    }
+  ]
+}

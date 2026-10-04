@@ -1,0 +1,110 @@
+{
+  "id": "msse",
+  "level": "graduate",
+  "name": "MS Software Engineering",
+  "aliases": ["Software Engineering", "SE", "MSSE", "MS SE", "Master of Science in Software Engineering"],
+  "department": "Computer Engineering",
+  "college": "Engineering",
+  "total_units": 33,
+  "sources": [
+    {"url": "https://www.sjsu.edu/msse/program-requirements/index.php", "kind": "page"},
+    {"url": "https://www.sjsu.edu/msse/program-requirements/enterprise-software-technologies.php", "kind": "page"},
+    {"url": "https://www.sjsu.edu/msse/program-requirements/data-science.php", "kind": "page"},
+    {"url": "https://www.sjsu.edu/msse/program-requirements/cloud-computing-and-virtualization.php", "kind": "page"},
+    {"url": "https://www.sjsu.edu/msse/program-requirements/software-systems-engineering.php", "kind": "page"},
+    {"url": "https://www.sjsu.edu/msse/program-requirements/networking-software.php", "kind": "page"},
+    {"url": "https://www.sjsu.edu/msse/program-requirements/cybersecurity.php", "kind": "page"}
+  ],
+  "choices": [
+    {"id": "track", "label": "Specialization", "infer": true, "options": [
+      {"id": "enterprise-software-technologies", "label": "Enterprise Software Technologies"},
+      {"id": "data-science", "label": "Data Science"},
+      {"id": "cloud-computing-and-virtualization", "label": "Cloud Computing and Virtualization"},
+      {"id": "software-systems-engineering", "label": "Software Systems Engineering"},
+      {"id": "networking-software", "label": "Networking Software"},
+      {"id": "cybersecurity", "label": "Cybersecurity"}
+    ]},
+    {"id": "plan", "label": "Culminating experience", "options": [
+      {"id": "project", "label": "Master's project (CMPE 295A/B)"},
+      {"id": "thesis", "label": "Master's thesis (CMPE 299A/B)"}
+    ]}
+  ],
+  "courses": {
+    "CMPE 202": {"title": "Software Systems Engineering", "units": 3},
+    "CMPE 272": {"title": "Enterprise Software Platforms", "units": 3},
+    "CMPE 206": {"title": "Computer Network Design", "units": 3},
+    "CMPE 207": {"title": "Network Programming and Applications", "units": 3},
+    "CMPE 209": {"title": "Network Security", "units": 3},
+    "CMPE 219": {"title": "Cybersecurity Clinics with HCI", "units": 3},
+    "CMPE 257": {"title": "Machine Learning", "units": 3},
+    "CMPE 258": {"title": "Deep Learning", "units": 3},
+    "CMPE 273": {"title": "Enterprise Distributed Systems", "units": 3},
+    "CMPE 275": {"title": "Enterprise Application Development", "units": 3},
+    "CMPE 279": {"title": "Software Security Technologies", "units": 3},
+    "CMPE 281": {"title": "Cloud Technologies", "units": 3},
+    "CMPE 283": {"title": "Virtualization Technologies", "units": 3},
+    "CMPE 285": {"title": "Software Engineering Processes", "units": 3},
+    "CMPE 287": {"title": "Software Quality Assurance and Testing", "units": 3},
+    "CMPE 294": {"title": "Computer Engineering Seminar", "units": 3},
+    "ENGR 200W": {"title": "Engineering Reports", "units": 3},
+    "CMPE 295A": {"title": "Master's Project I", "units": 3},
+    "CMPE 295B": {"title": "Master's Project II", "units": 3},
+    "CMPE 299A": {"title": "Master's Thesis I", "units": 3},
+    "CMPE 299B": {"title": "Master's Thesis II", "units": 3}
+  },
+  "requirements": [
+    {"id": "core", "label": "Degree core", "units": 6, "all": ["CMPE 202", "CMPE 272"]},
+    {"id": "gwar", "label": "Graduate writing (GWAR)", "units": 3, "from": ["CMPE 294", "ENGR 200W"],
+     "description": "CMPE 294 (preferred) or ENGR 200W."},
+    {"id": "specialization-core", "label": "Specialization core", "group": "Specialization and electives (18 units)", "units": 6, "choice": "track",
+     "description": "Both core classes of your specialization.",
+     "by_option": {
+       "enterprise-software-technologies": {"all": ["CMPE 273", "CMPE 275"]},
+       "data-science": {"all": ["CMPE 257", "CMPE 258"]},
+       "cloud-computing-and-virtualization": {"all": ["CMPE 281", "CMPE 283"]},
+       "software-systems-engineering": {"all": ["CMPE 285", "CMPE 287"]},
+       "networking-software": {"all": ["CMPE 206", "CMPE 207"]},
+       "cybersecurity": {"pools": [
+         {"id": "network-security", "label": "CMPE 209 or CMPE 219", "min_units": 3, "max_units": 3, "from": ["CMPE 209", "CMPE 219"]},
+         {"id": "software-security", "label": "CMPE 279", "min_units": 3, "max_units": 3, "from": ["CMPE 279"]}
+       ]}
+     }},
+    {"id": "specialization-choice", "label": "Specialization choice", "group": "Specialization and electives (18 units)", "units": 3, "choice": "track",
+     "description": "One class from another specialization.",
+     "by_option": {
+       "enterprise-software-technologies": {"from": ["CMPE 281", "CMPE 283", "CMPE 285", "CMPE 287", "CMPE 206", "CMPE 207", "CMPE 257", "CMPE 258", "CMPE 209", "CMPE 219", "CMPE 279"]},
+       "data-science": {"from": ["CMPE 273", "CMPE 275", "CMPE 281", "CMPE 283", "CMPE 285", "CMPE 287", "CMPE 206", "CMPE 207", "CMPE 209", "CMPE 219", "CMPE 279"]},
+       "cloud-computing-and-virtualization": {"from": ["CMPE 273", "CMPE 275", "CMPE 285", "CMPE 287", "CMPE 206", "CMPE 207", "CMPE 257", "CMPE 258", "CMPE 209", "CMPE 219", "CMPE 279"]},
+       "software-systems-engineering": {"from": ["CMPE 273", "CMPE 275", "CMPE 281", "CMPE 283", "CMPE 206", "CMPE 207", "CMPE 257", "CMPE 258", "CMPE 209", "CMPE 219", "CMPE 279"]},
+       "networking-software": {"from": ["CMPE 273", "CMPE 275", "CMPE 281", "CMPE 283", "CMPE 285", "CMPE 287", "CMPE 257", "CMPE 258", "CMPE 209", "CMPE 219", "CMPE 279"]},
+       "cybersecurity": {"from": ["CMPE 273", "CMPE 275", "CMPE 281", "CMPE 283", "CMPE 285", "CMPE 287", "CMPE 206", "CMPE 207", "CMPE 257", "CMPE 258"]}
+     }},
+    {"id": "electives", "label": "Electives", "group": "Specialization and electives (18 units)", "units": 9,
+     "description": "Any CMPE graduate course (200 or higher) except CMPE 270, 271, 294, 298, 298I, 295A/B and 299A/B, including other specializations' classes and CMPE 296A-296Z.",
+     "match": {"subject": "CMPE", "min_number": 200, "exclude": ["CMPE 270", "CMPE 271", "CMPE 294", "CMPE 298", "CMPE 298I", "CMPE 295A", "CMPE 295B", "CMPE 299A", "CMPE 299B"]},
+     "suggest": ["CMPE 206", "CMPE 207", "CMPE 209", "CMPE 219", "CMPE 257", "CMPE 258", "CMPE 273", "CMPE 275", "CMPE 279", "CMPE 281", "CMPE 283", "CMPE 285", "CMPE 287"]},
+    {"id": "culminating", "label": "Culminating experience", "units": 6, "choice": "plan",
+     "by_option": {
+       "project": {"all": ["CMPE 295A", "CMPE 295B"]},
+       "thesis": {"all": ["CMPE 299A", "CMPE 299B"]}
+     }}
+  ],
+  "conditions": [
+    "Meet the competency in written English requirement: CMPE 294 (preferred), ENGR 200W, or an alternative listed in the catalog."
+  ],
+  "merge_groups": ["Specialization and electives (18 units)"],
+  "prerequisites": {
+    "CMPE 295A": {"min_units": 15, "requirements": ["core", "specialization-core"], "basis": "documented",
+                  "note": "15 units, including the degree core and your specialization core, before CMPE 295A."},
+    "CMPE 299A": {"min_units": 15, "requirements": ["core", "specialization-core"], "basis": "documented",
+                  "note": "15 units, including the degree core and your specialization core, before CMPE 299A."},
+    "CMPE 295B": {"courses": ["CMPE 295A"], "requirements": ["core", "specialization-core", "specialization-choice", "gwar"], "basis": "documented",
+                  "note": "All core, specialization and GWAR classes, and CMPE 295A, before CMPE 295B."},
+    "CMPE 299B": {"courses": ["CMPE 299A"], "requirements": ["core", "specialization-core", "specialization-choice", "gwar"], "basis": "documented",
+                  "note": "All core, specialization and GWAR classes, and CMPE 299A, before CMPE 299B."}
+  },
+  "notes": [
+    "Courses from other departments may count as electives with prior advisor approval.",
+    "If the written English requirement is met another way (see the catalog), 3 more elective units are needed instead of the GWAR class."
+  ]
+}
