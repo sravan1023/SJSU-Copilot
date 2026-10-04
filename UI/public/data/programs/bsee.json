@@ -1,0 +1,203 @@
+{
+ "id": "bsee",
+ "name": "BS Electrical Engineering",
+ "department": "Electrical Engineering",
+ "college": "Engineering",
+ "own_subjects": [
+  "EE"
+ ],
+ "built_at": "2026-10-02",
+ "sources": [
+  {
+   "url": "https://www.sjsu.edu/ee/undergraduate-program/syllabi.php",
+   "last_updated": "2026-08-12"
+  }
+ ],
+ "courses": [
+  {
+   "code": "EE 30",
+   "title": "Introduction to Programming Micro-Controllers for Electrical Engineering",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 97",
+   "title": "Introductory Electrical Engineering Laboratory",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 98",
+   "title": "Introduction to Circuit Analysis",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 102",
+   "title": "Probability and Statistics in Electrical Engineering",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 110",
+   "title": "Circuits and Systems",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 110L",
+   "title": "Continuous and Discrete Time Systems Lab",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 112",
+   "title": "Introduction to Signal Processing",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 118",
+   "title": "Digital Logic Circuit Design",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 120",
+   "title": "Microprocessor Based System Design",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 122",
+   "title": "Electronic Design I",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 124",
+   "title": "Electronic Design II",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 128",
+   "title": "Physical Electronics",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 132",
+   "title": "Theory of Automatic Controls",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 140",
+   "title": "Principles of Electromagnetic Fields",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 160",
+   "title": "Principles of Communication Systems",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 198A",
+   "title": "Senior Design Project I",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 198B",
+   "title": "Senior Design Project II",
+   "group": "Required EE Courses"
+  },
+  {
+   "code": "EE 104",
+   "title": "Applied Programming in Electrical Engineering",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 106",
+   "title": "Fundamentals of Mechatronics Engineering",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 127",
+   "title": "Electronics for Biomedical Applications",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 129",
+   "title": "Introduction to Integrated Circuits Processing and Design",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 130",
+   "title": "Electric Machines and Drives",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 134",
+   "title": "Power Systems",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 136",
+   "title": "Semiconductor Power Electronics",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 138",
+   "title": "Embedded Control System Design",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 161",
+   "title": "Digital Communication Systems",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 166",
+   "title": "Design of CMOS Digital Integrated Circuits",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 171",
+   "title": "Introduction to Machine Learning for Electrical Engineers",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 172",
+   "title": "Introduction to Microwave Engineering",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 174",
+   "title": "Analog Peripheral for Embedded Systems",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 176",
+   "title": "Computer Organization",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 178",
+   "title": "Digital Design with FPGAs",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 180",
+   "title": "Individual Studies",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 181",
+   "title": "Fundamentals of Internetworking",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 182",
+   "title": "Analog and Mixed-Signal IC Test Development",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 183",
+   "title": "Electronics Test Design Engineering II",
+   "group": "Technical Electives"
+  },
+  {
+   "code": "EE 189",
+   "title": "Special Topics in Electrical Engineering",
+   "group": "Technical Electives"
+  }
+ ]
+}

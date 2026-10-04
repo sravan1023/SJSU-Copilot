@@ -22,6 +22,7 @@ export default function Sidebar({
   onProfileClick,
   onInternAlertsClick,
   onRegistrationClick,
+  onDegreeProgressClick,
   onLogout,
   user,
   currentPage,
@@ -106,7 +107,14 @@ export default function Sidebar({
       <div className="px-4 mb-5">
         <h3 className="text-[11px] font-semibold text-sidebar-text-muted px-2 mb-2 uppercase tracking-wider">Services</h3>
         <div className="space-y-1">
-          <SidebarToolItem icon={<GraduationCap size={16} />} label="Degree Progress" />
+          {capabilities.degreeProgress && (
+            <SidebarToolItem
+              icon={<GraduationCap size={16} />}
+              label="Degree Progress"
+              active={currentPage === 'degree'}
+              onClick={onDegreeProgressClick}
+            />
+          )}
           {capabilities.registrationInfo && (
             <SidebarToolItem
               icon={<Calendar size={16} />}

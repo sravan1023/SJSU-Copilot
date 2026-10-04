@@ -1,0 +1,228 @@
+{
+ "id": "bsae",
+ "name": "BS Aerospace Engineering",
+ "department": "Aerospace Engineering",
+ "college": "Engineering",
+ "own_subjects": [
+  "AE"
+ ],
+ "built_at": "2026-10-02",
+ "sources": [
+  {
+   "url": "https://www.sjsu.edu/ae/programs/bsae/prerequisite.php",
+   "last_updated": "2025-04-25"
+  }
+ ],
+ "courses": [
+  {
+   "code": "MATH 30",
+   "title": "Calculus I",
+   "group": null
+  },
+  {
+   "code": "MATH 31",
+   "title": "Calculus II",
+   "group": null
+  },
+  {
+   "code": "MATH 32",
+   "title": "Calculus III",
+   "group": null
+  },
+  {
+   "code": "MATH 33A",
+   "title": "Ordinary Differential Equations",
+   "group": null
+  },
+  {
+   "code": "CHEM 1A",
+   "title": "General Chemistry",
+   "group": null
+  },
+  {
+   "code": "PHYS 50",
+   "title": "General Physics / Mechanics",
+   "group": null
+  },
+  {
+   "code": "PHYS 51",
+   "title": "General Physics / Electricity & Magnetism",
+   "group": null
+  },
+  {
+   "code": "PHYS 52",
+   "title": "General Physics / Heat & Light",
+   "group": null
+  },
+  {
+   "code": "ENGR 10",
+   "title": "Intro to Engineering",
+   "group": null
+  },
+  {
+   "code": "AE 15",
+   "title": "AE Past, Present & Future",
+   "group": null
+  },
+  {
+   "code": "AE 20",
+   "title": "CAD for Aerospace Engineers",
+   "group": null
+  },
+  {
+   "code": "AE 30",
+   "title": "Computer Programming for Aerospace Engineers",
+   "group": null
+  },
+  {
+   "code": "EE 98",
+   "title": "Introduction to Circuit Analysis",
+   "group": null
+  },
+  {
+   "code": "ENGR 100W",
+   "title": "Engineering Reports",
+   "group": null
+  },
+  {
+   "code": "AE 100",
+   "title": "Fundamentals of Aerospace Engineering",
+   "group": null
+  },
+  {
+   "code": "AE 105",
+   "title": "Mathematical Methods for Aerospace Engineers",
+   "group": null
+  },
+  {
+   "code": "AE 107",
+   "title": "Programming & AI for Aerospace Applications",
+   "group": null
+  },
+  {
+   "code": "AE 110",
+   "title": "Space Systems Engineering",
+   "group": null
+  },
+  {
+   "code": "AE 112",
+   "title": "Aerospace Structural Analysis I",
+   "group": null
+  },
+  {
+   "code": "AE 114",
+   "title": "Aerospace Structural Analysis II",
+   "group": null
+  },
+  {
+   "code": "AE 119",
+   "title": "Finite Element Analysis for Aerospace Applications",
+   "group": null
+  },
+  {
+   "code": "AE 138",
+   "title": "Vector Based Dynamics for Aerospace Applications",
+   "group": null
+  },
+  {
+   "code": "AE 140",
+   "title": "Rigid Body Dynamics",
+   "group": null
+  },
+  {
+   "code": "AE 142",
+   "title": "Astrodynamics",
+   "group": null
+  },
+  {
+   "code": "AE 149",
+   "title": "Advanced Dynamics & Simulation",
+   "group": null
+  },
+  {
+   "code": "AE 157",
+   "title": "Aerospace Automatic Control System Design",
+   "group": null
+  },
+  {
+   "code": "AE 160",
+   "title": "Aerodynamics I",
+   "group": null
+  },
+  {
+   "code": "AE 162",
+   "title": "Aerodynamics II",
+   "group": null
+  },
+  {
+   "code": "AE 164",
+   "title": "Aerothermodynamics",
+   "group": null
+  },
+  {
+   "code": "AE 165",
+   "title": "Aerospace Flight Mechanics",
+   "group": null
+  },
+  {
+   "code": "AE 166",
+   "title": "Rocketry",
+   "group": null
+  },
+  {
+   "code": "AE 167",
+   "title": "Aerospace Propulsion",
+   "group": null
+  },
+  {
+   "code": "AE 168",
+   "title": "Aero Vehicle Dynamics & Control",
+   "group": null
+  },
+  {
+   "code": "AE 169",
+   "title": "Computational Fluid Dynamics",
+   "group": null
+  },
+  {
+   "code": "AE 171A",
+   "title": "Aircraft Design I",
+   "group": null
+  },
+  {
+   "code": "AE 171B",
+   "title": "Aircraft Design II",
+   "group": null
+  },
+  {
+   "code": "AE 172A",
+   "title": "Spacecraft Design I",
+   "group": null
+  },
+  {
+   "code": "AE 172B",
+   "title": "Spacecraft Design II",
+   "group": null
+  },
+  {
+   "code": "AE 173",
+   "title": "Design of UAV",
+   "group": null
+  },
+  {
+   "code": "AE 180",
+   "title": "Individual Studies",
+   "group": null
+  },
+  {
+   "code": "ENGR 195A",
+   "title": "Global & Societal Issues in Engineering I",
+   "group": null
+  },
+  {
+   "code": "ENGR 195B",
+   "title": "Global & Societal Issues in Engineering II",
+   "group": null
+  }
+ ]
+}

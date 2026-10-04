@@ -1,0 +1,163 @@
+{
+ "id": "bsise",
+ "name": "BS Industrial and Systems Engineering",
+ "department": "Industrial and Systems Engineering",
+ "college": "Engineering",
+ "own_subjects": [
+  "ISE"
+ ],
+ "built_at": "2026-10-02",
+ "sources": [
+  {
+   "url": "https://www.sjsu.edu/ise/programs/bs-ise/program-requirements.php",
+   "last_updated": "2022-01-19"
+  }
+ ],
+ "courses": [
+  {
+   "code": "MATH 30",
+   "title": "Calculus I",
+   "group": null
+  },
+  {
+   "code": "MATH 31",
+   "title": "Calculus II",
+   "group": null
+  },
+  {
+   "code": "MATH 32",
+   "title": "Calculus III",
+   "group": null
+  },
+  {
+   "code": "MATH 123",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "PHYS 50",
+   "title": "General Physics / Mechanics",
+   "group": null
+  },
+  {
+   "code": "PHYS 51",
+   "title": "General Physics / Electricity & Magnetism",
+   "group": null
+  },
+  {
+   "code": "CHEM 1A",
+   "title": "General Chemistry",
+   "group": null
+  },
+  {
+   "code": "CMPE 30",
+   "title": "Programming Concepts and Methodology",
+   "group": null
+  },
+  {
+   "code": "ENGR 10",
+   "title": "Intro to Engineering",
+   "group": null
+  },
+  {
+   "code": "ME 20",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "MATE 25",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 102",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 105",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 115",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 120",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 130",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 131",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 135",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 140",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 142",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 151",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 155",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 167",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 170",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 194",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 195A",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "ISE 195B",
+   "title": null,
+   "group": null
+  },
+  {
+   "code": "CMPE 131",
+   "title": "Software Engineering",
+   "group": null
+  },
+  {
+   "code": "ENGR 100W",
+   "title": "Engineering Reports",
+   "group": null
+  }
+ ]
+}

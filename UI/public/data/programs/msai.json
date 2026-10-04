@@ -1,0 +1,314 @@
+{
+ "id": "msai",
+ "level": "graduate",
+ "name": "MS Artificial Intelligence",
+ "aliases": [
+  "Artificial Intelligence",
+  "AI",
+  "MSAI",
+  "MS AI",
+  "Master of Science in Artificial Intelligence"
+ ],
+ "department": "Computer Engineering",
+ "college": "Engineering",
+ "total_units": 33,
+ "sources": [
+  {
+   "url": "https://www.sjsu.edu/cmpe/graduate_programs/ms-ai/msaiprogram-requirements.php",
+   "kind": "page",
+   "last_updated": "2026-05-06"
+  }
+ ],
+ "choices": [
+  {
+   "id": "track",
+   "label": "Specialization",
+   "infer": true,
+   "options": [
+    {
+     "id": "intelligent-data-systems",
+     "label": "Intelligent Data Systems (Data Science)"
+    },
+    {
+     "id": "cybersecurity-in-ai",
+     "label": "Cybersecurity in AI"
+    },
+    {
+     "id": "autonomous-systems",
+     "label": "Autonomous Systems"
+    }
+   ]
+  },
+  {
+   "id": "plan",
+   "label": "Culminating experience",
+   "options": [
+    {
+     "id": "project",
+     "label": "Master's project (CMPE 295A/B)"
+    },
+    {
+     "id": "thesis",
+     "label": "Master's thesis (CMPE 299A/B)"
+    }
+   ]
+  }
+ ],
+ "courses": {
+  "CMPE 252": {
+   "title": "Artificial Intelligence and Data Engineering",
+   "units": 3
+  },
+  "CMPE 257": {
+   "title": "Machine Learning",
+   "units": 3
+  },
+  "ISE 201": {
+   "title": "Math Foundations for Decision and Data Sciences",
+   "units": 3
+  },
+  "CMPE 209": {
+   "title": "Network Security and Applications",
+   "units": 3
+  },
+  "CMPE 214": {
+   "title": "GPU Architecture and Programming",
+   "units": 3
+  },
+  "CMPE 217": {
+   "title": "Human AI Interaction",
+   "units": 3
+  },
+  "CMPE 219": {
+   "title": "Cybersecurity Clinics with HCI",
+   "units": 3
+  },
+  "CMPE 243": {
+   "title": "Embedded Systems Applications",
+   "units": 3
+  },
+  "CMPE 249": {
+   "title": "Intelligent Autonomous Systems",
+   "units": 3
+  },
+  "CMPE 253": {
+   "title": "AI Threat Intelligence",
+   "units": 3
+  },
+  "CMPE 255": {
+   "title": "Data Mining",
+   "units": 3,
+   "evidence": "Counted as an Area A or B elective on a student's MyProgress report (2026-10-02); not on the department page's current lists. Placed in Area B until its area is confirmed."
+  },
+  "CMPE 256": {
+   "title": "Recommender Systems",
+   "units": 3
+  },
+  "CMPE 258": {
+   "title": "Deep Learning",
+   "units": 3
+  },
+  "CMPE 259": {
+   "title": "Natural Language Processing",
+   "units": 3
+  },
+  "CMPE 260": {
+   "title": "Reinforcement Learning",
+   "units": 3
+  },
+  "CMPE 261": {
+   "title": "Generative AI",
+   "units": 3
+  },
+  "CMPE 266": {
+   "title": "Big Data Engineering and Analytics",
+   "units": 3
+  },
+  "CMPE 281": {
+   "title": "Intelligent Cloud Platform",
+   "units": 3
+  },
+  "CMPE 294": {
+   "title": "Computer Engineering Seminar",
+   "units": 3
+  },
+  "CMPE 295A": {
+   "title": "Master's Project I",
+   "units": 3
+  },
+  "CMPE 295B": {
+   "title": "Master's Project II",
+   "units": 3
+  },
+  "CMPE 297": {
+   "title": "Special Topics in Computer/Software Engineering",
+   "units": 3
+  },
+  "CMPE 298": {
+   "title": "Special Problems",
+   "units": 3
+  },
+  "CMPE 299A": {
+   "title": "Master's Thesis I",
+   "units": 3
+  },
+  "CMPE 299B": {
+   "title": "Master's Thesis II",
+   "units": 3
+  }
+ },
+ "requirements": [
+  {
+   "id": "core",
+   "label": "Core courses",
+   "units": 9,
+   "all": [
+    "CMPE 252",
+    "CMPE 257",
+    "ISE 201"
+   ]
+  },
+  {
+   "id": "gwar",
+   "label": "Graduate writing (GWAR)",
+   "units": 3,
+   "from": [
+    "CMPE 294"
+   ]
+  },
+  {
+   "id": "specialization",
+   "label": "Specialization",
+   "group": "Specialization and electives (15 units)",
+   "units": 6,
+   "choice": "track",
+   "description": "At least 6 units from your specialization.",
+   "by_option": {
+    "intelligent-data-systems": {
+     "from": [
+      "CMPE 256",
+      "CMPE 258",
+      "CMPE 259"
+     ]
+    },
+    "cybersecurity-in-ai": {
+     "from": [
+      "CMPE 209",
+      "CMPE 219",
+      "CMPE 253"
+     ]
+    },
+    "autonomous-systems": {
+     "from": [
+      "CMPE 249",
+      "CMPE 258",
+      "CMPE 260"
+     ]
+    }
+   }
+  },
+  {
+   "id": "electives",
+   "label": "Electives",
+   "group": "Specialization and electives (15 units)",
+   "units": 9,
+   "description": "3 courses; at least 3 units from Area A, the rest from either list.",
+   "pools": [
+    {
+     "id": "area-a",
+     "label": "Area A (at least 3 units)",
+     "min_units": 3,
+     "from": [
+      "CMPE 249",
+      "CMPE 253",
+      "CMPE 256",
+      "CMPE 258",
+      "CMPE 259",
+      "CMPE 260",
+      "CMPE 261",
+      "CMPE 266"
+     ]
+    },
+    {
+     "id": "area-b",
+     "label": "Area B (up to 6 units)",
+     "max_units": 6,
+     "from": [
+      "CMPE 214",
+      "CMPE 217",
+      "CMPE 219",
+      "CMPE 243",
+      "CMPE 255",
+      "CMPE 281",
+      "CMPE 297",
+      "CMPE 298"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "culminating",
+   "label": "Culminating experience",
+   "units": 6,
+   "choice": "plan",
+   "by_option": {
+    "project": {
+     "all": [
+      "CMPE 295A",
+      "CMPE 295B"
+     ]
+    },
+    "thesis": {
+     "all": [
+      "CMPE 299A",
+      "CMPE 299B"
+     ]
+    }
+   }
+  }
+ ],
+ "conditions": [
+  "Pass the Graduation Writing Assessment Requirement (GWAR); CMPE 294 satisfies it.",
+  "A program GPA of at least 3.0 (shown as a requirement on a student's MyProgress report, 2026-10-02)."
+ ],
+ "merge_groups": [
+  "Specialization and electives (15 units)"
+ ],
+ "prerequisites": {
+  "CMPE 295A": {
+   "min_units": 15,
+   "requirements": [
+    "core"
+   ],
+   "basis": "guide",
+   "note": "Usually after 15 units and the core courses, with graduate director consent. Confirm with your advisor."
+  },
+  "CMPE 299A": {
+   "min_units": 15,
+   "requirements": [
+    "core"
+   ],
+   "basis": "guide",
+   "note": "Usually after 15 units and the core courses, with graduate director consent. Confirm with your advisor."
+  },
+  "CMPE 295B": {
+   "courses": [
+    "CMPE 295A"
+   ],
+   "basis": "documented",
+   "note": "Follows CMPE 295A."
+  },
+  "CMPE 299B": {
+   "courses": [
+    "CMPE 299A"
+   ],
+   "basis": "documented",
+   "note": "Follows CMPE 299A."
+  }
+ },
+ "notes": [
+  "Students must pass the Graduation Writing Assessment Requirement (GWAR); CMPE 294 satisfies it.",
+  "MyProgress may name the Intelligent Data Systems specialization 'Data Science', and older catalogs list a slightly different set of electives (for example CMPE 255). MyProgress is authoritative for your catalog year."
+ ],
+ "built_at": "2026-10-02"
+}

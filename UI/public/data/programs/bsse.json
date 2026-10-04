@@ -1,0 +1,253 @@
+{
+ "id": "bsse",
+ "name": "BS Software Engineering",
+ "department": "Computer Engineering",
+ "college": "Engineering",
+ "own_subjects": [
+  "CMPE"
+ ],
+ "built_at": "2026-10-02",
+ "sources": [
+  {
+   "url": "https://www.sjsu.edu/cmpe/undergraduate_programs/undergraduate_courses.php",
+   "last_updated": "2026-05-09"
+  }
+ ],
+ "courses": [
+  {
+   "code": "CMPE 30",
+   "title": "Programming Concepts and Methodology",
+   "group": null
+  },
+  {
+   "code": "CMPE 50",
+   "title": "Intro to Data Structures and Object-Oriented Programming",
+   "group": null
+  },
+  {
+   "code": "CMPE 70",
+   "title": "Assembly Language Programming",
+   "group": null
+  },
+  {
+   "code": "CMPE 92",
+   "title": "International Program Studies",
+   "group": null
+  },
+  {
+   "code": "CMPE 103",
+   "title": "Ethical AI Engineering",
+   "group": null
+  },
+  {
+   "code": "CMPE 108",
+   "title": "AI, Data Engineering, and Ethics",
+   "group": null
+  },
+  {
+   "code": "CMPE 110",
+   "title": "Electronics for Computing Systems",
+   "group": null
+  },
+  {
+   "code": "CMPE 113",
+   "title": "AI Security & Privacy",
+   "group": null
+  },
+  {
+   "code": "CMPE 120",
+   "title": "Computer Organization and Architecture",
+   "group": null
+  },
+  {
+   "code": "CMPE 125",
+   "title": "Digital Design",
+   "group": null
+  },
+  {
+   "code": "CMPE 126",
+   "title": "Algorithms and Data Structure Design",
+   "group": null
+  },
+  {
+   "code": "CMPE 127",
+   "title": "Microprocessor Design I",
+   "group": null
+  },
+  {
+   "code": "CMPE 130",
+   "title": "Advanced Algorithm Design",
+   "group": null
+  },
+  {
+   "code": "CMPE 131",
+   "title": "Software Engineering",
+   "group": null
+  },
+  {
+   "code": "CMPE 132",
+   "title": "Information Security",
+   "group": null
+  },
+  {
+   "code": "CMPE 135",
+   "title": "Object-Oriented Analysis and Design",
+   "group": null
+  },
+  {
+   "code": "CMPE 137",
+   "title": "Wireless Mobile Software Engineering",
+   "group": null
+  },
+  {
+   "code": "CMPE 138",
+   "title": "Database Systems I",
+   "group": null
+  },
+  {
+   "code": "CMPE 139",
+   "title": "Fundamentals of Data Mining",
+   "group": null
+  },
+  {
+   "code": "CMPE 140",
+   "title": "Computer Architecture and Design",
+   "group": null
+  },
+  {
+   "code": "CMPE 142",
+   "title": "Operating Systems Design",
+   "group": null
+  },
+  {
+   "code": "CMPE 146",
+   "title": "Real-Time Embedded System Co-Design",
+   "group": null
+  },
+  {
+   "code": "CMPE 148",
+   "title": "Computer Networks I",
+   "group": null
+  },
+  {
+   "code": "CMPE 152",
+   "title": "Compiler Design",
+   "group": null
+  },
+  {
+   "code": "CMPE 163",
+   "title": "Introduction to Computer Graphics and Augmented Reality",
+   "group": null
+  },
+  {
+   "code": "CMPE 165",
+   "title": "Software Engineering Process Management",
+   "group": null
+  },
+  {
+   "code": "CMPE 172",
+   "title": "Large Scale Systems",
+   "group": null
+  },
+  {
+   "code": "CMPE 180",
+   "title": "Individual Studies",
+   "group": null
+  },
+  {
+   "code": "CMPE 180A",
+   "title": "Data Structures and Algorithms",
+   "group": null
+  },
+  {
+   "code": "CMPE 180B",
+   "title": "Database Systems",
+   "group": null
+  },
+  {
+   "code": "CMPE 180C",
+   "title": "Operating Systems Design",
+   "group": null
+  },
+  {
+   "code": "CMPE 180D",
+   "title": "Digital Design and Microprocessors",
+   "group": null
+  },
+  {
+   "code": "CMPE 181",
+   "title": "Internet of Things Platforms",
+   "group": null
+  },
+  {
+   "code": "CMPE 182",
+   "title": "Internet of Things Security",
+   "group": null
+  },
+  {
+   "code": "CMPE 183",
+   "title": "Cryptocurrencies and Blockchains",
+   "group": null
+  },
+  {
+   "code": "CMPE 184",
+   "title": "Human-Centric Cybersecurity Clinics",
+   "group": null
+  },
+  {
+   "code": "CMPE 185",
+   "title": "Autonomous Mobile Robots",
+   "group": null
+  },
+  {
+   "code": "CMPE 187",
+   "title": "Software Quality Engineering",
+   "group": null
+  },
+  {
+   "code": "CMPE 188",
+   "title": "Machine Learning",
+   "group": null
+  },
+  {
+   "code": "CMPE 189",
+   "title": "Special Topics in Computer Engineering",
+   "group": null
+  },
+  {
+   "code": "CMPE 190",
+   "title": "Deep Learning and Large Language Models",
+   "group": null
+  },
+  {
+   "code": "CMPE 192",
+   "title": "International Program Studies",
+   "group": null
+  },
+  {
+   "code": "CMPE 195A",
+   "title": "Senior Design Project I",
+   "group": null
+  },
+  {
+   "code": "CMPE 195B",
+   "title": "Senior Design Project II",
+   "group": null
+  },
+  {
+   "code": "CMPE 195E",
+   "title": "Senior Design Project I",
+   "group": null
+  },
+  {
+   "code": "CMPE 195F",
+   "title": "Senior Design Project II",
+   "group": null
+  },
+  {
+   "code": "CMPE 198",
+   "title": "Technology and Civilization",
+   "group": null
+  }
+ ]
+}

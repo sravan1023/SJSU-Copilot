@@ -1,0 +1,223 @@
+{
+ "id": "bsbme",
+ "name": "BS Biomedical Engineering",
+ "department": "Biomedical Engineering",
+ "college": "Engineering",
+ "own_subjects": [
+  "BME"
+ ],
+ "built_at": "2026-10-02",
+ "sources": [
+  {
+   "url": "https://www.sjsu.edu/bme/programs/bs-bme/curriculum.php",
+   "last_updated": "2026-02-26"
+  }
+ ],
+ "courses": [
+  {
+   "code": "AFAM 2A",
+   "title": "African Americans and the Development of America’s History and Government",
+   "group": "African American Studies (6 units)"
+  },
+  {
+   "code": "AFAM 2B",
+   "title": "African Americans and the Development of America’s History and Government",
+   "group": "African American Studies (6 units)"
+  },
+  {
+   "code": "AAS 33A",
+   "title": "Asian Americans in U.S. History I",
+   "group": "Asian American Studies (6 units)"
+  },
+  {
+   "code": "AAS 33B",
+   "title": "Asian Americans in U.S. History II",
+   "group": "Asian American Studies (6 units)"
+  },
+  {
+   "code": "CCS 10A",
+   "title": "Mexican Americans and the Development of U.S. History and Government",
+   "group": "Chicana and Chicano Studies (6 units)"
+  },
+  {
+   "code": "CCS 10B",
+   "title": "Mexican Americans and the Development of U.S. History and Government",
+   "group": "Chicana and Chicano Studies (6 units)"
+  },
+  {
+   "code": "HIST 15",
+   "title": "Essentials of U.S. History",
+   "group": "U.S. History and Government (6 units)"
+  },
+  {
+   "code": "POLS 15",
+   "title": "Essentials of U.S. & California Government",
+   "group": "U.S. History and Government (6 units)"
+  },
+  {
+   "code": "BIOL 30",
+   "title": "Principles of Biology I",
+   "group": "Major Preparation (45 units)"
+  },
+  {
+   "code": "CHEM 1A",
+   "title": "General Chemistry",
+   "group": "Major Preparation (45 units)"
+  },
+  {
+   "code": "CHEM 1B",
+   "title": "General Chemistry",
+   "group": "Major Preparation (45 units)"
+  },
+  {
+   "code": "CHEM 8",
+   "title": "Organic Chemistry",
+   "group": "Major Preparation (45 units)"
+  },
+  {
+   "code": "CHEM 9",
+   "title": "Organic Chemistry Lab",
+   "group": "Major Preparation (45 units)"
+  },
+  {
+   "code": "ENGL 1A",
+   "title": "First Year Writing",
+   "group": "Major Preparation (45 units)"
+  },
+  {
+   "code": "ENGL 1B",
+   "title": "Argument and Analysis",
+   "group": "Major Preparation (45 units)"
+  },
+  {
+   "code": "MATH 30",
+   "title": "Calculus I",
+   "group": "Major Preparation (45 units)"
+  },
+  {
+   "code": "MATH 31",
+   "title": "Calculus II",
+   "group": "Major Preparation (45 units)"
+  },
+  {
+   "code": "MATH 32",
+   "title": "Calculus III",
+   "group": "Major Preparation (45 units)"
+  },
+  {
+   "code": "PHYS 50",
+   "title": "General Physics/Mechanics",
+   "group": "Major Preparation (45 units)"
+  },
+  {
+   "code": "PHYS 51",
+   "title": "General Physics/Electricity and Magnetism",
+   "group": "Major Preparation (45 units)"
+  },
+  {
+   "code": "BME 25",
+   "title": "Introduction to Biomedical Engineering Design",
+   "group": "Core Courses (11 units)"
+  },
+  {
+   "code": "BME 65",
+   "title": "Biomedical Applications of Statics",
+   "group": "Core Courses (11 units)"
+  },
+  {
+   "code": "ENGR 10",
+   "title": "Introduction to Engineering",
+   "group": "Core Courses (11 units)"
+  },
+  {
+   "code": "ENGR 100W",
+   "title": "Engineering Reports",
+   "group": "Core Courses (11 units)"
+  },
+  {
+   "code": "BME 68",
+   "title": "Biomedical Applications of Metals and Ceramics",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 115",
+   "title": "Foundations of Biomedical Engineering",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 116",
+   "title": "Biosensors and Bioinstrumentation",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 117",
+   "title": "Biotransport Phenomena",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 130",
+   "title": "Numerical Methods in Biomedical Engineering",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 133",
+   "title": "Programming Applications in Biomedical Engineering",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 135",
+   "title": "Biomedical Engineering Design Methods",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 147",
+   "title": "Quantitative and Statistical Methods for Biomedical Engineers",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 165",
+   "title": "Applied Engineering Biomechanics",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 168",
+   "title": "Medical and Biological Polymers",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 174",
+   "title": "Biomedical Regulatory Requirements",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 177",
+   "title": "Physiology for Engineers",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 178",
+   "title": "Biomedical Product Realization",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 198A",
+   "title": "Senior Design Project I",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "BME 198B",
+   "title": "Senior Design Project II",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "ENGR 195A",
+   "title": "Global and Social Issues in Engineering",
+   "group": "Major Courses (43 units)"
+  },
+  {
+   "code": "ENGR 195B",
+   "title": "Global and Social Issues in Engineering",
+   "group": "Major Courses (43 units)"
+  }
+ ]
+}

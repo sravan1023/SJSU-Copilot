@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import Sidebar from './components/Sidebar';
 import MainChat from './components/MainChat';
 import RightPanel from './components/RightPanel';
 import UserProfile from './components/UserProfile';
 import InternJobsAlertsPage from './internAlerts/InternJobsAlertsPage.tsx';
 import RegistrationInfoPage from './registration/RegistrationInfoPage.tsx';
+// Lazy: only students who open it pay for the page and the tag vocabulary.
+const DegreeProgressPage = lazy(() => import('./degreeProgress/DegreeProgressPage'));
 import Login from './components/Login';
 import Signup from './components/Signup';
 import VerifyEmail from './components/VerifyEmail';
@@ -211,6 +213,11 @@ export default function App() {
     () => resolveAudience(principal?.kind === 'guest' ? 'guest' : profile?.active_audience),
     [principal?.kind, profile?.active_audience]
   );
+
+  // Degree Progress is a student page: an account is needed to save it, and an
+  // alum or faculty member has no remaining requirements to record.
+  const canDegree = !!can.degreeProgress && audience?.id === 'student';
+  const sidebarCapabilities = { ...can, degreeProgress: canDegree };
 
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [currentPage, setCurrentPage] = useState('chat');
@@ -1155,9 +1162,10 @@ export default function App() {
         onProfileClick={() => setCurrentPage('profile')}
         onInternAlertsClick={() => setCurrentPage('intern-alerts')}
         onRegistrationClick={() => setCurrentPage('registration')}
+        onDegreeProgressClick={() => setCurrentPage('degree')}
         onLogout={handleLogout}
         user={user}
-        capabilities={can}
+        capabilities={sidebarCapabilities}
         isGuest={principal?.kind === 'guest'}
         currentPage={currentPage}
         conversations={conversations}
@@ -1197,6 +1205,15 @@ export default function App() {
         <InternJobsAlertsPage onBack={() => setCurrentPage('chat')} />
       ) : currentPage === 'registration' && can.registrationInfo ? (
         <RegistrationInfoPage onBack={() => setCurrentPage('chat')} />
+      ) : currentPage === 'degree' && canDegree ? (
+        <Suspense fallback={<div className="flex-1 bg-bg-main" />}>
+          <DegreeProgressPage
+            onBack={() => setCurrentPage('chat')}
+            user={user}
+            profile={profile}
+            onOpenSettings={can.profile ? () => setCurrentPage('profile') : undefined}
+          />
+        </Suspense>
       ) : (
         <>
           <MainChat

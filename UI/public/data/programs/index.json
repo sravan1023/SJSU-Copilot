@@ -1,0 +1,144 @@
+{
+ "built_at": "2026-10-02",
+ "programs": [
+  {
+   "id": "bsae",
+   "level": "undergraduate",
+   "name": "BS Aerospace Engineering",
+   "department": "Aerospace Engineering",
+   "college": "Engineering",
+   "aliases": [
+    "Aerospace Engineering",
+    "Aerospace",
+    "AE",
+    "BSAE"
+   ],
+   "course_count": 42,
+   "last_updated": "2025-04-25"
+  },
+  {
+   "id": "bsbme",
+   "level": "undergraduate",
+   "name": "BS Biomedical Engineering",
+   "department": "Biomedical Engineering",
+   "college": "Engineering",
+   "aliases": [
+    "Biomedical Engineering",
+    "Biomedical",
+    "BME",
+    "BSBME"
+   ],
+   "course_count": 41,
+   "last_updated": "2026-02-26"
+  },
+  {
+   "id": "bscmpe",
+   "level": "undergraduate",
+   "name": "BS Computer Engineering",
+   "department": "Computer Engineering",
+   "college": "Engineering",
+   "aliases": [
+    "Computer Engineering",
+    "CMPE",
+    "CompE",
+    "BSCMPE"
+   ],
+   "course_count": 47,
+   "last_updated": "2026-05-09"
+  },
+  {
+   "id": "bsee",
+   "level": "undergraduate",
+   "name": "BS Electrical Engineering",
+   "department": "Electrical Engineering",
+   "college": "Engineering",
+   "aliases": [
+    "Electrical Engineering",
+    "EE",
+    "BSEE"
+   ],
+   "course_count": 37,
+   "last_updated": "2026-08-12"
+  },
+  {
+   "id": "bsise",
+   "level": "undergraduate",
+   "name": "BS Industrial and Systems Engineering",
+   "department": "Industrial and Systems Engineering",
+   "college": "Engineering",
+   "aliases": [
+    "Industrial and Systems Engineering",
+    "Industrial & Systems Engineering",
+    "Industrial Engineering",
+    "ISE",
+    "BSISE"
+   ],
+   "course_count": 29,
+   "last_updated": "2022-01-19"
+  },
+  {
+   "id": "bsse",
+   "level": "undergraduate",
+   "name": "BS Software Engineering",
+   "department": "Computer Engineering",
+   "college": "Engineering",
+   "aliases": [
+    "Software Engineering",
+    "BSSE"
+   ],
+   "course_count": 47,
+   "last_updated": "2026-05-09"
+  },
+  {
+   "id": "msai",
+   "level": "graduate",
+   "name": "MS Artificial Intelligence",
+   "department": "Computer Engineering",
+   "college": "Engineering",
+   "aliases": [
+    "Artificial Intelligence",
+    "AI",
+    "MSAI",
+    "MS AI",
+    "Master of Science in Artificial Intelligence"
+   ],
+   "total_units": 33,
+   "course_count": 25,
+   "last_updated": "2026-05-06"
+  },
+  {
+   "id": "mscs",
+   "level": "graduate",
+   "name": "MS Computer Science",
+   "department": "Computer Science",
+   "college": "Science",
+   "aliases": [
+    "Computer Science",
+    "CS",
+    "MSCS",
+    "MS CS",
+    "Master of Science in Computer Science"
+   ],
+   "total_units": 33,
+   "course_count": 67,
+   "last_updated": "2026-10-02"
+  },
+  {
+   "id": "msse",
+   "level": "graduate",
+   "name": "MS Software Engineering",
+   "department": "Computer Engineering",
+   "college": "Engineering",
+   "aliases": [
+    "Software Engineering",
+    "SE",
+    "MSSE",
+    "MS SE",
+    "Master of Science in Software Engineering"
+   ],
+   "total_units": 33,
+   "course_count": 21,
+   "last_updated": "2024-08-17"
+  }
+ ]
+}

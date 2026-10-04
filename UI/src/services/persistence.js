@@ -52,6 +52,8 @@ const ACCOUNT_CAPABILITIES = {
   memory: true,
   internAlerts: true,
   registrationInfo: true,
+  // Self-reported progress is stored on the account; a guest has none.
+  degreeProgress: true,
 };
 
 const GUEST_CAPABILITIES = {
@@ -61,6 +63,7 @@ const GUEST_CAPABILITIES = {
   memory: false,
   internAlerts: false,
   registrationInfo: true,
+  degreeProgress: false,
 };
 
 // ── Supabase-backed ───────────────────────────────────────────────────────────
