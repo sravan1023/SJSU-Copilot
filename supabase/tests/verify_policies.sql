@@ -664,9 +664,15 @@ select pg_temp.expect('alice executes archive_stale_memories',
 select pg_temp.expect('anon executes get_memory_context',
   $q$select public.get_memory_context('11111111-1111-1111-1111-111111111111'::uuid, null::uuid)$q$,
   true, 'anon');
-select pg_temp.expect('anon executes match_documents',
-  $q$select public.match_documents(array_fill(0.0::real, array[1536])::public.vector, 1, 0.5)$q$,
-  true, 'anon');
+-- match_documents had no caller and 20261004000100 drops it. An expect() here
+-- would pass on "function does not exist", so the catalog is checked instead.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'public' AND p.proname = 'match_documents')
+  THEN RAISE NOTICE '  ok   match_documents dropped';
+  ELSE RAISE NOTICE '  FAIL match_documents still exists'; END IF;
+END $$;
 -- The four functions 20260930000100 creates or recreates. Deny-by-default is
 -- aspirational without an assertion per function: measured on this image, a new
 -- function in public still carries EXECUTE to PUBLIC despite
