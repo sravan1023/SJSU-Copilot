@@ -20,8 +20,6 @@ from urllib.parse import urlsplit
 ALLOWED_HOSTS = ("www.sjsu.edu",)
 BASE = "https://www.sjsu.edu"
 
-SEASONS = ("spring", "summer", "fall", "winter")
-
 # `\Z`, not `$`: Python's `$` also matches before a trailing newline, Postgres's
 # does not, and these keys are interpolated into fixed URLs.
 TERM_KEY_RE = re.compile(r"^(spring|summer|fall|winter)-20[0-9]{2}\Z")

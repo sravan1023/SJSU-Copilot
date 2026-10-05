@@ -206,7 +206,6 @@ def test_pdf_furniture_is_stripped():
         def __init__(self, *_a, **_kw):
             self.pages = [_FakePage(i) for i in range(6)]
 
-    import kb.fetcher as fetcher_mod
     import sys
     import types
 

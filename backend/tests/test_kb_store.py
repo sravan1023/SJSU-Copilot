@@ -13,7 +13,6 @@ call: PostgREST rejects a bulk insert whose objects do not all carry the same
 keys (PGRST102, "All object keys must match"), and `sync_seeds` builds rows with
 deliberately different keys so the table's own column defaults survive a re-sync.
 """
-import json
 from unittest.mock import patch
 from urllib.parse import urlsplit
 

@@ -70,7 +70,7 @@ def _provider(request: httpx.Request) -> httpx.Response:
 
 def _chat(student_ctx, headers=AUTH_HEADERS, flag="true", content=QUESTION, env=None, rag=None):
     """POST /api/chat. Returns (status, frames, provider calls, timing, log text, spies)."""
-    searches, kb_inputs, rag_inputs = [], [], []
+    searches, kb_inputs = [], []
 
     def fake_search_web(query):
         searches.append(query)

@@ -23,7 +23,6 @@ from unittest.mock import patch
 import pytest
 
 from kb import ingest, store
-from kb.chunker import Chunk
 from kb.fetcher import FetchResult, Outcome
 from kb.robots import HostRules
 

@@ -215,12 +215,6 @@ def build_base_prompt(audience: str | None = None) -> str:
     return f"{core} {clause}".strip() if clause else core
 
 
-# Kept as a module-level constant for callers that have no audience to pass
-# (tests, scripts). Equivalent to build_base_prompt(None), which is the
-# default audience.
-BASE_SYSTEM_PROMPT = build_base_prompt()
-
-
 def _get_api_key() -> str:
     key = os.getenv("GROQ_API_KEY")
     if not key:

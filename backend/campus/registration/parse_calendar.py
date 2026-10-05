@@ -62,7 +62,6 @@ class CalendarParse:
     headers: list[tuple[str, ...]] = field(default_factory=list)
     unknown_headers: list[tuple[str, ...]] = field(default_factory=list)
     data_rows: int = 0
-    blank_cells: int = 0
 
     @property
     def event_keys(self) -> set[str]:
@@ -219,7 +218,6 @@ def parse_academic_calendar(html: str, ay_key: str) -> CalendarParse:
             for idx, term_key in columns:
                 date_raw = cells[idx]
                 if not date_raw:
-                    result.blank_cells += 1
                     continue
                 result.data_rows += 1
                 window = ay_window

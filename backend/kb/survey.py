@@ -25,7 +25,7 @@ import time
 import httpx
 
 from kb.chunker import chunk_html, chunk_text
-from kb.fetcher import Outcome, conditional_get
+from kb.fetcher import conditional_get
 from kb.robots import USER_AGENT, RobotsCache
 
 SEEDS = pathlib.Path(__file__).with_name("seeds.json")

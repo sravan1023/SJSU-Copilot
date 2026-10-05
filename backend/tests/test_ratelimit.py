@@ -18,7 +18,6 @@ itself -- go through it.
 """
 import asyncio
 import os
-import time
 from unittest.mock import patch
 
 import httpx

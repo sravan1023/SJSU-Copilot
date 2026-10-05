@@ -52,10 +52,6 @@ def reload() -> None:
     _compiled.cache_clear()
 
 
-def all_keys() -> list[str]:
-    return [k for k, _ in _compiled()]
-
-
 def keys_for_label(label: str) -> list[str]:
     """Every key whose label pattern matches, in file order. Empty if none."""
     return [key for key, pats in _compiled() if any(p.search(label) for p in pats)]

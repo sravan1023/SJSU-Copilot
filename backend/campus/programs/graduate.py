@@ -75,14 +75,6 @@ def body_codes(body: dict) -> list[str]:
     return codes
 
 
-def defined_codes(defn: dict) -> set[str]:
-    out: set[str] = set()
-    for req in defn.get("requirements", []):
-        for _, body in _bodies(req):
-            out.update(body_codes(body))
-    return out
-
-
 def validate(defn: dict) -> list[str]:
     errors: list[str] = []
     err = errors.append

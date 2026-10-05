@@ -34,17 +34,6 @@ from typing import Any
 # tuple, so this is a convenience rather than the authority.
 AUDIENCE_IDS = ("student", "alumni", "guest", "faculty")
 
-# The six values of the affiliation_kind enum. A different concept: what a
-# person claims to be, not which experience they get.
-AFFILIATION_KINDS = (
-    "student",
-    "alumni",
-    "faculty",
-    "staff",
-    "applicant",
-    "community",
-)
-
 _DEFAULT_PATH = Path(__file__).resolve().parent.parent / "UI" / "src" / "config" / "audiences.json"
 
 

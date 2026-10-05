@@ -88,13 +88,6 @@ class Outcome(str, Enum):
     PDF_TRUNCATED = "pdf_truncated"
 
 
-# Outcomes worth another attempt: the host is up but transiently unhappy. A 4xx
-# other than 429 is a statement about the request, so retrying is just noise.
-RETRYABLE = frozenset(
-    {Outcome.TIMEOUT, Outcome.HTTP_429, Outcome.HTTP_5XX, Outcome.TRANSPORT_ERROR}
-)
-
-
 @dataclass
 class FetchResult:
     outcome: Outcome

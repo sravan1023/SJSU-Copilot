@@ -20,7 +20,6 @@ from fastapi.testclient import TestClient
 import auth
 import main
 from routers import admin_campus
-from services import registration
 from .conftest import AUTH_HEADERS, GUEST_HEADERS, SUPABASE_URL
 
 client = TestClient(main.app)

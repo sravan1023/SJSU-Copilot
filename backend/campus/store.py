@@ -48,10 +48,6 @@ EVENT_CATEGORIES = ("registrar", "academic", "payment")
 SINGLE_FLIGHT_MINUTES = 30
 PRUNE_MIN_AGE_HOURS = 24
 
-# Every event row is sent with exactly these keys: PostgREST rejects a bulk insert
-# whose objects do not all carry the same ones (PGRST102).
-EVENT_COLUMNS = ("snapshot_id", "category", "label_raw", "date_raw", "start_date", "end_date", "event_key")
-
 
 class StoreError(RuntimeError):
     """A write failed. `status` and `code` carry PostgREST's answer when there was one."""
@@ -171,6 +167,8 @@ def _event_row(snapshot_id: str, row: dict) -> dict:
         raise StoreError(
             f"end {end} before start {start} would fail reg_term_events_date_order_check"
         )
+    # Every key on every row, None included: PostgREST rejects a bulk insert whose
+    # objects do not all carry the same ones (PGRST102).
     return {
         "snapshot_id": snapshot_id,
         "category": category,

@@ -14,7 +14,6 @@ Every database path here is offline-tested only: migration 20261001000100 is on
 live, but this code has not yet run against it.
 """
 import asyncio
-import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -448,7 +447,7 @@ def test_first_flip_conflict_is_the_same_lost_race():
     orig = db._post_campus_current
 
     def rival_first(params, body, prefer):
-        rival = db.add_snapshot("registrar", "fall-2026", status="current", digest="rival", current=True)
+        db.add_snapshot("registrar", "fall-2026", status="current", digest="rival", current=True)
         return orig(params, body, prefer)  # now a 409
 
     db._post_campus_current = rival_first
