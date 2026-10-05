@@ -7,8 +7,8 @@ raising. Collected by pytest as-is, a failing check would still show as a
 passing test. The hook below fails the test whenever its run added to FAILURES,
 so `python -m pytest` and `python -m tests.<suite>` agree.
 
-**Credentials.** Eighteen request sites across test_chat_stream,
-test_observability, test_chat_e2e and test_professors POST to gated routes.
+**Credentials.** The request sites across test_chat_stream,
+test_observability and test_chat_e2e POST to gated routes.
 They used to run under `AUTH_OPTIONAL=true`, a flag that let a request with no
 Authorization header through. That flag is gone: once guest principals exist,
 "admit an unauthenticated caller" is a privilege escalation rather than a
@@ -17,8 +17,7 @@ pass for the wrong reason.
 
 They now carry a real, verified token, minted here and signed with a secret
 that exists only in this process. `AUTH_HEADERS` is a signed-in *user*, which
-is what those suites were always pretending to be; `/api/professors` is behind
-`require_user` and would answer a guest with 403. `GUEST_HEADERS` is available
+is what those suites were always pretending to be. `GUEST_HEADERS` is available
 for anything that wants the other side.
 
 Nothing here weakens a gate: an endpoint that rejects these headers rejects

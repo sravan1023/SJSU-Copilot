@@ -24,6 +24,7 @@ import pytest
 import respx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+from fastapi import Depends, FastAPI
 
 import auth
 import main
@@ -150,14 +151,24 @@ class _StubJWKS:
 # ── Drivers ───────────────────────────────────────────────────────────────────
 
 
-def _request(method, path, token=None, env=None, jwks=None, **kwargs):
-    """Drive the real app in-process and return the response."""
+# No route in the real app is behind require_user alone (the require_capability
+# routes add a grant lookup), so the gate is driven through this one.
+_account_app = FastAPI()
+
+
+@_account_app.post("/account-only", dependencies=[Depends(auth.require_user)])
+def _account_only():
+    return {}
+
+
+def _request(method, path, token=None, env=None, jwks=None, app=None, **kwargs):
+    """Drive the real app (or `app`) in-process and return the response."""
     headers = kwargs.pop("headers", {})
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
     async def go():
-        transport = httpx.ASGITransport(app=main.app)
+        transport = httpx.ASGITransport(app=app or main.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             return await client.request(method, path, headers=headers, **kwargs)
 
@@ -368,7 +379,6 @@ def test_es256_without_a_jwks_client_is_503_not_401():
         ("/api/chat", CHAT_BODY),
         ("/api/generate-title", {"message": "hello"}),
         ("/api/auto-behavior", CHAT_BODY),
-        ("/api/professors", {"message": "who teaches CS 151"}),
     ],
 )
 def test_every_gated_endpoint_rejects_anonymous(path, body):
@@ -678,9 +688,7 @@ def test_a_guest_is_refused_an_account_only_endpoint_with_403():
     identically, forever. 403 is the true statement and the one the UI can act
     on by offering a sign-in.
     """
-    res = _request(
-        "POST", "/api/professors", token=_guest(), json={"message": "who teaches CS 151"}
-    )
+    res = _request("POST", "/account-only", token=_guest(), app=_account_app)
     assert res.status_code == 403
     # Not a challenge: there is nothing to re-authenticate as.
     assert "www-authenticate" not in res.headers
@@ -688,7 +696,7 @@ def test_a_guest_is_refused_an_account_only_endpoint_with_403():
 
 def test_no_credentials_is_still_401_not_403():
     """The other half of the same distinction, so neither collapses into it."""
-    res = _request("POST", "/api/professors", json={"message": "x"})
+    res = _request("POST", "/account-only", app=_account_app)
     assert res.status_code == 401
     assert res.headers["www-authenticate"] == "Bearer"
 
