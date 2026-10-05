@@ -111,7 +111,6 @@ export default function UserProfile({ onBack, user, audience, onProfileChange, b
 
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const [_loadingProfile, setLoadingProfile] = useState(true);
   const [activeTab, setActiveTab] = useState('profile'); // 'profile' | 'personalization'
   const [personalSection, setPersonalSection] = useState('style'); // 'style' | 'priorities' | 'memory'
 
@@ -119,7 +118,7 @@ export default function UserProfile({ onBack, user, audience, onProfileChange, b
   useEffect(() => {
     let alive = true;
     async function fetchProfile() {
-      if (!user?.id) { setLoadingProfile(false); return; }
+      if (!user?.id) return;
 
       const { data } = await supabase
         .from('profiles')
@@ -152,7 +151,6 @@ export default function UserProfile({ onBack, user, audience, onProfileChange, b
         }
         setAudienceData(next);
       }
-      setLoadingProfile(false);
     }
     fetchProfile();
     return () => { alive = false; };

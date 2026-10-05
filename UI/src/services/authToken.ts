@@ -57,11 +57,6 @@ export function clearAuthToken(): void {
   inflight = null;
 }
 
-/** Which kind of token is cached, if any. */
-export function getTokenKind(): TokenKind | null {
-  return cachedKind;
-}
-
 function stillFresh(): boolean {
   if (!cachedToken || !cachedExpiresAt) return false;
   return cachedExpiresAt - Date.now() / 1000 > REFRESH_WINDOW_S;

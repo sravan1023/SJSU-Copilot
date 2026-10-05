@@ -81,9 +81,6 @@ const config = raw as unknown as AudienceConfig;
 
 export const AUDIENCES: Record<AudienceId, Audience> = config.audiences;
 export const DEFAULT_AUDIENCE: AudienceId = config.default;
-export const AUDIENCE_IDS: AudienceId[] = Object.keys(AUDIENCES) as AudienceId[];
-export const AFFILIATION_TO_AUDIENCE: Record<AffiliationKind, AudienceId> =
-  config.affiliationToAudience;
 
 /**
  * Resolve an audience id from whatever the caller has, falling back rather
@@ -95,16 +92,6 @@ export function resolveAudience(id: string | null | undefined): Audience {
     return AUDIENCES[id as AudienceId];
   }
   return AUDIENCES[DEFAULT_AUDIENCE];
-}
-
-/** True when `id` is one of the four the database will accept. */
-export function isAudienceId(id: string | null | undefined): id is AudienceId {
-  return !!id && Object.prototype.hasOwnProperty.call(AUDIENCES, id);
-}
-
-/** The audience a declared affiliation belongs to. */
-export function audienceForAffiliation(affiliation: AffiliationKind): AudienceId {
-  return AFFILIATION_TO_AUDIENCE[affiliation] ?? DEFAULT_AUDIENCE;
 }
 
 /**

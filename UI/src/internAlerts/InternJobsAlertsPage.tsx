@@ -38,7 +38,6 @@ export default function InternJobsAlertsPage({ onBack }: InternJobsAlertsPagePro
   const [selectedCategory, setSelectedCategory] = useState<(typeof CATEGORY_OPTIONS)[number] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
 
   const filteredJobs = useMemo(() => {
     const jobs = dashboard?.jobs ?? [];
@@ -141,7 +140,6 @@ export default function InternJobsAlertsPage({ onBack }: InternJobsAlertsPagePro
       <div className="flex-1 overflow-auto p-4 md:p-6">
         <div className="w-full space-y-3">
           {loading && <div className="text-sm text-text-secondary">Loading top jobs...</div>}
-          {!loading && !error && notice && <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300">{notice}</div>}
           {!loading && error && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">{error}</div>}
           {!loading && !error && (
             <>

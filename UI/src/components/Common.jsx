@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { MessageSquare, Link as LinkIcon, Pencil, Trash2, Check, X, ChevronRight, ChevronDown, FolderOpen, Plus, ArrowRightFromLine, ArrowRightToLine, Sliders } from 'lucide-react';
+import { MessageSquare, Link as LinkIcon, Pencil, Trash2, Check, X, FolderOpen, Plus, ArrowRightFromLine, ArrowRightToLine, Sliders } from 'lucide-react';
 
 export function SuggestionCard({ title, subtitle, onClick }) {
     return (
