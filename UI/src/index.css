@@ -52,8 +52,7 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-hover: var(--sidebar-hover);
 
-  --color-sjsu-gold: var(--sjsu-gold);
-  --color-sjsu-gold-hover: var(--sjsu-gold-hover);
+  --font-display: 'LEMONMILK', system-ui, sans-serif;
 }
 
 :root {
